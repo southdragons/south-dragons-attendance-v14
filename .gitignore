@@ -1,0 +1,12 @@
+node_modules
+.install-incomplete
+.nuxt
+.output
+.data
+.env
+.env.*
+!.env.example
+.DS_Store
+coverage
+*.log
+dist
