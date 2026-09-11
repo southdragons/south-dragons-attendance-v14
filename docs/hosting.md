@@ -1,6 +1,8 @@
 # 公開サイトの運用
 
-公開先: https://south-dragons-jbc.sleek-wolf-9937.chatgpt.site
+公開先: https://south-dragons-jbc.imagimo.chatgpt.site
+
+現在は所有者のみアクセス可能です。保護者への共有前にSitesで公開範囲を変更する必要があります。
 
 このURLはパソコンの開発サーバーを停止しても利用できます。保護者の出欠入力は既存のGASとスプレッドシートへ保存されます。管理者は既存の共通パスワードでログインします。
 

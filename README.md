@@ -1,3 +1,11 @@
+# South Dragons 設計書v1.4対応
+
+現行の移行先は **Nuxt静的サイト + Supabase + GitHub Pages** です。
+
+セットアップ、データ移行、匿名認証、公開と監視については [v1.4移行手順](docs/migration-v1.4.md) を参照してください。クラウド接続先の設定・移行・実機検証はこれからです。
+
+以下は移行元のGAS構成に関する記録です。
+
 # South Dragons 出欠確認
 
 Nuxt + Tailwind CSS + DaisyUIで構築した、学童野球チームの出欠管理アプリです。

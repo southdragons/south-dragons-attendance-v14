@@ -10,3 +10,7 @@ node_modules
 coverage
 *.log
 dist
+supabase/.temp
+supabase/.branches
+backups/
+*.tar.gz

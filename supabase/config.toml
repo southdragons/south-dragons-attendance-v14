@@ -1,0 +1,13 @@
+project_id = "south-dragons"
+
+[auth]
+enable_anonymous_sign_ins = true
+
+[functions.team]
+# The gateway legacy-secret check does not accept modern signing keys.
+# team verifies every user JWT with auth.getUser before any database operation.
+verify_jwt = false
+
+[functions.maintenance]
+# Machine endpoint authenticates MAINTENANCE_KEY itself; no user JWT.
+verify_jwt = false

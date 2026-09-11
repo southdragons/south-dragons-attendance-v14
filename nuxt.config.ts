@@ -5,7 +5,7 @@ export default defineNuxtConfig({
   ssr: false,
   nitro: { cloudflare: { nodeCompat: true } },
   devtools: { enabled: false },
-  runtimeConfig: { gasWebAppUrl: '', gasApiKey: '' },
+  runtimeConfig: { gasWebAppUrl: '', gasApiKey: '', public: { dataBackend: 'supabase', supabaseUrl: '', supabasePublishableKey: '' } },
   css: ['~/assets/css/main.css'],
   vite: { plugins: [tailwindcss()] },
   app: {
@@ -17,7 +17,7 @@ export default defineNuxtConfig({
         { name: 'theme-color', content: '#174d36' },
         { name: 'robots', content: 'noindex, nofollow' },
       ],
-      link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
+      link: [{ rel: 'icon', type: 'image/svg+xml', href: `${process.env.NUXT_APP_BASE_URL || '/'}favicon.svg` }],
     },
   },
 })

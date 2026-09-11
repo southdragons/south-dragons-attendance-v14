@@ -1,0 +1,26 @@
+name: Review unused anonymous users
+on:
+  schedule:
+    - cron: '37 22 1 * *'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Delete only unreferenced anonymous users unused for at least 90 days
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/maintenance.mjs cleanup
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          MAINTENANCE_KEY: ${{ secrets.MAINTENANCE_KEY }}
+          CLEANUP_APPLY: ${{ inputs.apply || vars.ANON_CLEANUP_ENABLED == 'true' }}
