@@ -2,14 +2,14 @@
 
 対象設計書：South_Dragons_出欠管理システム_設計書_v1.4.docx（2026年9月10日）。
 
-既存の画面を維持し、Supabase Anonymous Auth、所有権付き出欠、再登録申請、仮回答、管理者承認、GitHub Pagesへの静的公開を実装しています。接続先は作成済みです。SQL適用、匿名認証、公開キー、Edge FunctionsとSecretsの登録が完了し、監視APIのDB疎通とteam APIの認証・データ取得を確認済みです。実データ移行、LINE設定、GitHub Pages公開、公開後の操作確認はこれからです。旧Sitesの公開範囲は変更しません。
+既存の画面を維持し、Supabase Anonymous Auth、所有権付き出欠、再登録申請、仮回答、管理者承認、GitHub Pagesへの静的公開を実装しています。接続先は作成済みです。SQL適用、匿名認証、公開キー、Edge FunctionsとSecretsの登録が完了し、監視APIのDB疎通とteam APIの認証・データ取得を確認済みです。GitHub Pagesの公開、公開URLのHTTP 200とJS/CSS 8ファイルの取得、GitHub Actions経由の稼働監視と月次整理の試行も確認済みです。実データ移行、LINE設定、公開後の操作確認はこれからです。月次整理の削除は無効で、候補の確認のみです。旧Sitesの公開範囲は変更しません。
 
 ## 接続先
 
 - GitHub: https://github.com/southdragons/south-dragons-attendance-v14
 - Supabase: https://cuhkjnuwozgnqqqvqhnl.supabase.co
 - Supabase管理画面: https://supabase.com/dashboard/project/cuhkjnuwozgnqqqvqhnl
-- GitHub Pages予定URL: https://southdragons.github.io/south-dragons-attendance-v14/ （まだ未公開）
+- GitHub Pages公開URL: https://southdragons.github.io/south-dragons-attendance-v14/
 
 SQL Editorから設定する場合は、空の新規プロジェクトで `supabase/setup.sql` を1回実行します。2本のマイグレーションをまとめたファイルです。既存プロジェクトには実行しないでください。
 
