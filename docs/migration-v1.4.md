@@ -28,10 +28,12 @@ Edge FunctionのSecretsに以下を設定します。ローカルで入力する
 | MAINTENANCE_KEY | 日次監視・月次整理専用の十分長いランダム値 |
 | ALLOWED_ORIGINS | 公開URLのorigin。例 `https://organization.github.io`。複数はカンマ区切り。パス末尾は含めない |
 | APP_URL | パスを含む最終公開URL。LINE通知のリンク先 |
-| LINE_CHANNEL_ACCESS_TOKEN | 既存LINE Messaging APIのチャンネルアクセストークン |
-| LINE_ADMIN_TARGET_ID | 管理者宛のuserIdまたは運営者グループのgroupId |
+| LINE_CHANNEL_ACCESS_TOKEN | 当面はテスト専用LINE Messaging APIのチャンネルアクセストークン |
+| LINE_ADMIN_TARGET_ID | 当面はテスト担当者本人のuserId。本番への変更は利用者説明と切り替え指示の後 |
 
 `SUPABASE_URL`、`SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`はSupabase Edge環境の予約済み変数です。高権限キーはNuxtの公開設定に入れません。LINEの接続先が未設定でも申請はDBに保存され、管理画面に未処理件数と通知状態が表示されます。
+
+LINEは先にテスト専用アカウントで確認します。本番LINEへの切り替えは利用者への説明後、ユーザーの指示を受けて最後に行います。詳しくは [LINEテスト手順](line-test-setup.md) を参照してください。
 
 ## 2. 現在のデータを移す
 
