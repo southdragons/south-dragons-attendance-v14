@@ -15,6 +15,7 @@ beforeAll(async()=>{
     grant execute on function auth.uid() to public;`)
   await db.exec(readFileSync('supabase/migrations/20260911000000_v14.sql','utf8'))
   await db.exec(readFileSync('supabase/migrations/20260911000100_import.sql','utf8'))
+  await db.exec(readFileSync('supabase/migrations/20260912000000_writer_auth_permissions.sql','utf8'))
 },30000)
 afterAll(async()=>{await db?.close()})
 beforeEach(async()=>{
@@ -167,4 +168,19 @@ it('rolls back the whole import when a record references a missing event',async(
   await db.exec('delete from events; delete from players')
   await expect(asRole('service_role',owner,'select import_legacy_snapshot($1)',[JSON.stringify(snapshot)])).rejects.toThrow(/foreign key/)
   expect((await db.query('select * from players')).rows).toHaveLength(0)
+})
+
+it('repairs missing auth schema access without widening ownership or table access',async()=>{
+  await db.exec('revoke usage on schema auth from sd_attendance_writer')
+  expect((await db.query("select has_schema_privilege('sd_attendance_writer','auth','USAGE') as allowed")).rows[0]).toEqual({allowed:false})
+  await expect(write(owner)).rejects.toThrow(/permission denied for schema auth/)
+  await db.exec(readFileSync('supabase/migrations/20260912000000_writer_auth_permissions.sql','utf8'))
+  await db.exec(readFileSync('supabase/migrations/20260912000000_writer_auth_permissions.sql','utf8'))
+  await write(owner)
+  await write(owner,'future','p1','late')
+  await expect(write(stranger)).rejects.toThrow('FORBIDDEN')
+  await expect(asRole('authenticated',owner,'select * from attendance')).rejects.toThrow(/permission denied/)
+  const id=await request()
+  await write(stranger,'future','p1','absent',id)
+  expect((await db.query('select status from pending_attendance where request_id=$1',[id])).rows[0]).toEqual({status:'absent'})
 })

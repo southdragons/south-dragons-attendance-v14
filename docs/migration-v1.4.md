@@ -122,3 +122,9 @@ node --env-file=.env.verification scripts/verify-access.mjs
 - 退団者は現在・未来の一覧から除外し、公開中の過去イベントに回答履歴がある場合だけ履歴表示へ含めます。
 
 参考：[Supabase匿名認証](https://supabase.com/docs/guides/auth/auth-anonymous)、[Edge認証](https://supabase.com/docs/guides/functions/auth)、[GitHub Pagesのカスタムワークフロー](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)、[Free Planの停止](https://supabase.com/docs/guides/platform/free-project-pausing)。
+
+## 2026年9月12日：画面確認で見つかった保存権限の修正
+
+新規登録した本人の選手でも出欠保存が403となった。専用の検証データで実APIを再現し、`save_own_attendance` が `42501: permission denied for schema auth` を返すことを確認。復旧SQLは `supabase/migrations/20260912000000_writer_auth_permissions.sql`。保存用ロールのauthスキーマUSAGEとauth.uid実行権限のみを補う。テーブル権限・RLS・所有者データは変更しない。
+
+ローカルで同じ権限欠落を再現し、復旧SQL適用後の本人の保存・更新、他人の保存拒否、直接テーブルアクセス拒否、仮回答保存を含むDBテスト17件が成功。クラウドへの修正SQL適用と、その後の実API・画面での再確認は未完了。ユーザーが作成した「画面確認用0912」は操作確認継続用に残している。診断用に追加した別の選手・予定・匿名ユーザーは削除済み。
