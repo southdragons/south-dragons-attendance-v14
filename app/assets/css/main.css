@@ -185,6 +185,7 @@ h1 { font-size: 2.2rem; font-weight: 750; line-height: 1.4; letter-spacing: .035
 .admin-panel { border: 1px solid #e0e7db; border-radius: 12px; background: #fff; padding: 24px; }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
 .panel-heading h2 { font-size: 1.15rem; font-weight: 700; }
+.admin-month-controls { margin: 20px 0; flex-wrap: wrap; }
 .management-row { border-top: 1px solid #e9eee5; padding: 20px 0; display: flex; justify-content: space-between; align-items: center; gap: 14px; }
 .management-row h3 { font-size: 1rem; font-weight: 600; margin: 5px 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .management-row p, .management-row .meta { font-size: .8rem; color: #899580; }
