@@ -11,3 +11,7 @@ verify_jwt = false
 [functions.maintenance]
 # Machine endpoint authenticates MAINTENANCE_KEY itself; no user JWT.
 verify_jwt = false
+
+[functions.line-test-webhook]
+# LINE HMAC signature and a private, expiring capture phrase replace user JWT.
+verify_jwt = false
