@@ -15,7 +15,8 @@ beforeAll(async()=>{
     grant execute on function auth.uid() to public;`)
   await db.exec(readFileSync('supabase/migrations/20260911000000_v14.sql','utf8'))
   await db.exec(readFileSync('supabase/migrations/20260911000100_import.sql','utf8'))
-  await db.exec(readFileSync('supabase/migrations/20260912000000_writer_auth_permissions.sql','utf8'))
+  await db.exec(readFileSync('supabase/migrations/20260912000100_writer_jwt_subject.sql','utf8'))
+  await db.exec('revoke usage on schema auth from sd_attendance_writer')
 },30000)
 afterAll(async()=>{await db?.close()})
 beforeEach(async()=>{
@@ -32,6 +33,7 @@ async function asRole(role:string,user:string,sql:string,params:unknown[]=[]) {
   try {
     await db.exec(`set local role ${role}`)
     await db.query("select set_config('request.jwt.claim.sub',$1,true)",[user])
+    await db.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify(user?{sub:user,role}: {})])
     const result=await db.query(sql,params)
     await db.exec('reset role; release savepoint call_test')
     return result
@@ -170,17 +172,25 @@ it('rolls back the whole import when a record references a missing event',async(
   expect((await db.query('select * from players')).rows).toHaveLength(0)
 })
 
-it('repairs missing auth schema access without widening ownership or table access',async()=>{
-  await db.exec('revoke usage on schema auth from sd_attendance_writer')
+it('saves with auth schema access denied while retaining all access restrictions',async()=>{
   expect((await db.query("select has_schema_privilege('sd_attendance_writer','auth','USAGE') as allowed")).rows[0]).toEqual({allowed:false})
-  await expect(write(owner)).rejects.toThrow(/permission denied for schema auth/)
-  await db.exec(readFileSync('supabase/migrations/20260912000000_writer_auth_permissions.sql','utf8'))
-  await db.exec(readFileSync('supabase/migrations/20260912000000_writer_auth_permissions.sql','utf8'))
+  await db.exec(readFileSync('supabase/migrations/20260912000100_writer_jwt_subject.sql','utf8'))
   await write(owner)
   await write(owner,'future','p1','late')
   await expect(write(stranger)).rejects.toThrow('FORBIDDEN')
+  await expect(write('')).rejects.toThrow('UNAUTHORIZED')
   await expect(asRole('authenticated',owner,'select * from attendance')).rejects.toThrow(/permission denied/)
+  await expect(asRole('authenticated',owner,'select public.attendance_actor_id()')).rejects.toThrow(/permission denied/)
   const id=await request()
   await write(stranger,'future','p1','absent',id)
   expect((await db.query('select status from pending_attendance where request_id=$1',[id])).rows[0]).toEqual({status:'absent'})
+})
+it('uses the verified JWT subject and ignores the legacy per-claim setting',async()=>{
+  await db.exec('set local role sd_attendance_writer')
+  await db.query("select set_config('request.jwt.claim.sub',$1,true)",[stranger])
+  await db.query("select set_config('request.jwt.claims',$1,true)",[JSON.stringify({sub:owner,role:'authenticated'})])
+  expect((await db.query('select public.attendance_actor_id() as actor')).rows[0]).toEqual({actor:owner})
+  await db.query("select set_config('request.jwt.claims','',true)")
+  expect((await db.query('select public.attendance_actor_id() as actor')).rows[0]).toEqual({actor:null})
+  await db.exec('reset role')
 })

@@ -128,3 +128,11 @@ node --env-file=.env.verification scripts/verify-access.mjs
 新規登録した本人の選手でも出欠保存が403となった。専用の検証データで実APIを再現し、`save_own_attendance` が `42501: permission denied for schema auth` を返すことを確認。復旧SQLは `supabase/migrations/20260912000000_writer_auth_permissions.sql`。保存用ロールのauthスキーマUSAGEとauth.uid実行権限のみを補う。テーブル権限・RLS・所有者データは変更しない。
 
 ローカルで同じ権限欠落を再現し、復旧SQL適用後の本人の保存・更新、他人の保存拒否、直接テーブルアクセス拒否、仮回答保存を含むDBテスト17件が成功。クラウドへの修正SQL適用と、その後の実API・画面での再確認は未完了。ユーザーが作成した「画面確認用0912」は操作確認継続用に残している。診断用に追加した別の選手・予定・匿名ユーザーは削除済み。
+
+### 追加診断と代替修正
+
+ユーザーが権限追加を実行した後も、診断SQLでsd_attendance_writerのauth_usage=false、uid_execute=trueを確認。通常のGRANTによる修復が反映されないため、authスキーマへの追加アクセスを必要としない方式へ変更した。`public.attendance_actor_id()` はPostgRESTが認証後に設定するrequest.jwt.claimsのsubのみを参照し、ユーザーIDの引数は受け取らない。関数はSECURITY INVOKER、実行権限は保存用ロールのみ。既存RLSと出欠RPC内のauth.uid呼び出しをこの関数に置き換え、所有者・仮回答・予定・退団の制約を維持する。
+
+適用用ファイル：`supabase/repair-attendance.sql`。全体がトランザクションで、途中失敗時は変更を確定しない。新規環境用setup.sqlにも同じ修正を組み込み済み。既存環境ではsetup.sqlを再実行せず、repair-attendance.sqlのみ使用する。
+
+authスキーマへの保存用ロールのアクセスを明示的に拒否し、PostgREST形式のJWT claimsを使うDBテスト18件が成功。クラウドへの適用と保存再確認は待機中。
