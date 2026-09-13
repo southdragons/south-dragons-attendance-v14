@@ -93,10 +93,10 @@ h1 { font-size: 2.2rem; font-weight: 750; line-height: 1.4; letter-spacing: .035
 .scroll-hint { display: flex; gap: 8px; align-items: center; }
 .mine-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: .8rem; }
 .table-scroll { max-height: 660px; overflow: auto; background: white; border: 1px solid #dce4dc; border-radius: 12px; scrollbar-width: thin; scrollbar-color: #c9d6cb #f3f6f3; }
-.attendance-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; min-width: 990px; }
+.attendance-table { --player-width: 188px; --event-width: 160px; width: calc(var(--player-width) + var(--event-count, 1) * var(--event-width)); min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
 .attendance-table th, .attendance-table td { border-right: 1px solid #e9ede9; border-bottom: 1px solid #e9ede9; text-align: center; }
 .attendance-table tr > :last-child { border-right: 0; }
-.attendance-table .player-column { position: sticky; left: 0; z-index: 5; width: 188px; text-align: left; background: #fff; padding: 0 20px; box-shadow: 2px 0 4px #23462b04; }
+.attendance-table .player-column { position: sticky; left: 0; z-index: 5; width: var(--player-width); text-align: left; background: #fff; padding: 0 20px; box-shadow: 2px 0 4px #23462b04; }
 .attendance-table thead th { position: sticky; top: 0; z-index: 8; background: #f6f8f5; }
 .attendance-table thead .player-column { z-index: 10; background: #f6f8f5; font-size: .875rem; font-weight: 600; }
 .attendance-table thead .player-column small { color: #98a293; margin-left: 12px; font-weight: 400; }
@@ -104,7 +104,7 @@ h1 { font-size: 2.2rem; font-weight: 750; line-height: 1.4; letter-spacing: .035
 .event-heading:hover { background: #eaf1e9; }
 .event-date { font-size: 1.1rem; font-weight: 750; color: #42677b; }
 .event-date.sunday { color: #b46158; }
-.event-heading strong { font-size: .875rem; font-weight: 600; }
+.event-heading strong { max-width: 100%; overflow-wrap: anywhere; font-size: .875rem; font-weight: 600; }
 .event-heading small { display: flex; align-items: center; gap: 6px; color: #8e998d; font-size: .7rem; font-weight: 400; }
 .attendance-table tbody th { font-size: .875rem; font-weight: 550; height: 59px; }
 .attendance-table tbody .player-column > span { display: inline-block; vertical-align: middle; }
@@ -244,8 +244,8 @@ h1 { font-size: 2.2rem; font-weight: 750; line-height: 1.4; letter-spacing: .035
   .table-topline { font-size: .65rem; }
   .scroll-hint { font-size: .6rem; gap: 4px; }
   .mine-toggle { font-size: .7rem; }
-  .attendance-table { min-width: 845px; }
-  .attendance-table .player-column { width: 138px; padding-inline: 12px; }
+  .attendance-table { --player-width: clamp(112px, 36vw, 138px); }
+  .attendance-table .player-column { padding-inline: 12px; }
   .attendance-table tbody th { font-size: .8rem; }
   .player-index { display: none !important; }
   .event-date { font-size: 1rem; }
