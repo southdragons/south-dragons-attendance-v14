@@ -3,10 +3,12 @@ import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 
 const url = Deno.env.get('SUPABASE_URL')!
 const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false, autoRefreshToken: false } })
-const actions = new Set(['getData','registerPlayer','saveAttendance','savePendingAttendance','requestRegistration','reviewRegistration','saveEvent','setEventActive','renamePlayer','setPlayerActive','adminLogin','initializeAdmin','changeAdminPassword','adminLogout'])
+const actions = new Set(['getData','registerPlayer','saveAttendance','savePendingAttendance','requestRegistration','reviewRegistration','revokeDeviceAccess','saveEvent','setEventActive','renamePlayer','setPlayerActive','adminLogin','initializeAdmin','changeAdminPassword','adminLogout'])
 const errors: Record<string, [number,string]> = {
   UNAUTHORIZED: [401,'管理画面への再ログイン、またはページの再読み込みをお願いします。'],
-  FORBIDDEN: [403,'この選手の出欠は変更できません。端末を変更した場合は再登録を申請してください。'],
+  FORBIDDEN: [403,'この端末では、この選手の出欠を変更できません。利用申請の承認状況を確認してください。'],
+  APPROVAL_REQUIRED: [403,'管理者の承認後に出欠を入力できます。ページを再読み込みしてください。'],
+  CLIENT_UPDATE_REQUIRED: [409,'機能が更新されました。ページを再読み込みしてから操作してください。'],
   BAD_PASSWORD: [400,'管理パスワードが正しくありません。'],
   BAD_REQUEST: [400,'入力内容を確認してください。'],
   CONFLICT: [409,'状態が変更されています。更新して確認してください。'],
@@ -25,7 +27,7 @@ async function rpc(actor: string, action: string, payload: Record<string,unknown
   if(error) throw error
   return data
 }
-async function notifyAdmin(notification: {requestId:string;playerName:string;requestedAt:string}) {
+async function notifyAdmin(notification: {requestId:string;playerName:string;requestedAt:string;applicantName?:string;relation?:string;accessModel?:string}) {
   const token=Deno.env.get('LINE_CHANNEL_ACCESS_TOKEN'), to=Deno.env.get('LINE_ADMIN_TARGET_ID')
   let status='unconfigured'
   if(token && to) {
@@ -33,7 +35,7 @@ async function notifyAdmin(notification: {requestId:string;playerName:string;req
       const when=new Date(notification.requestedAt).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'})
       const response=await fetch('https://api.line.me/v2/bot/message/push',{
         method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json','X-Line-Retry-Key':notification.requestId},
-        body:JSON.stringify({to,messages:[{type:'text',text:`【South Dragons 再登録申請】\n${notification.playerName}さん\n申請日時：${when}\n管理画面で承認・却下を確認してください。\n${Deno.env.get('APP_URL') || ''}`}]}),signal:AbortSignal.timeout(8000),
+        body:JSON.stringify({to,messages:[{type:'text',text:`【South Dragons ${notification.accessModel === 'multi-device' ? '端末追加申請' : '再登録申請'}】\n${notification.playerName}さん\n${notification.accessModel === 'multi-device' ? `申請者：${notification.applicantName}（${notification.relation}）\n` : ''}申請日時：${when}\n管理画面で承認・却下を確認してください。\n${Deno.env.get('APP_URL') || ''}`}]}),signal:AbortSignal.timeout(8000),
       })
       status=response.ok || response.status===409 ? 'sent':'failed'
     } catch {status='failed'}
@@ -67,7 +69,7 @@ Deno.serve(async (request: Request) => {
     const action=body.action, p=body.payload || {}, token=typeof body.adminToken==='string'?body.adminToken:''
     let result
     if(action==='saveAttendance' || action==='savePendingAttendance') {
-      // User-scoped RPC: the SQL function's non-bypass role enforces auth.uid() RLS.
+      // User-scoped RPC: a non-bypass role enforces device access using the verified JWT subject.
       const scoped=createClient(url,Deno.env.get('SUPABASE_ANON_KEY')!,{global:{headers:{Authorization:`Bearer ${jwt}`}},auth:{persistSession:false,autoRefreshToken:false}})
       const {error}=await scoped.rpc('save_own_attendance',{p_event:p.eventId,p_player:p.playerId,p_status:p.status,p_comment:p.comment || '',p_request:action==='savePendingAttendance'?p.requestId:null})
       if(error) throw error

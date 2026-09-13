@@ -2,6 +2,8 @@
 
 対象設計書：South_Dragons_出欠管理システム_設計書_v1.4.docx（2026年9月10日）。
 
+追記：父母の複数端末対応の仕様と既存環境への更新は [端末追加対応](family-devices.md) を参照してください。本書の単一所有者・仮回答・権限移行の説明は旧方式の記録です。
+
 既存の画面を維持し、Supabase Anonymous Auth、所有権付き出欠、再登録申請、仮回答、管理者承認、GitHub Pagesへの静的公開を実装しています。接続先は作成済みです。SQL適用、匿名認証、公開キー、Edge FunctionsとSecretsの登録が完了し、監視APIのDB疎通とteam APIの認証・データ取得を確認済みです。GitHub Pagesの公開、公開URLのHTTP 200とJS/CSS 8ファイルの取得、GitHub Actions経由の稼働監視と月次整理の試行も確認済みです。2026年9月12日に既存データを移行し、実APIから移行前後の全項目の一致と旧管理者パスワードでのログイン・ログアウトを確認しました。テスト用LINEの接続・単体受信を確認し、再登録申請による通知状態sentと管理者処理も確認済みです。申請通知の本人受信確認、保護者・管理者による画面操作確認、本番LINEへの切り替えが残っています。本番LINEは利用者説明後の指示を受けて最後に切り替えます。月次整理の削除は無効で、候補の確認のみです。旧Sitesの公開範囲は変更しません。
 
 ## 接続先
@@ -11,13 +13,13 @@
 - Supabase管理画面: https://supabase.com/dashboard/project/cuhkjnuwozgnqqqvqhnl
 - GitHub Pages公開URL: https://southdragons.github.io/south-dragons-attendance-v14/
 
-SQL Editorから設定する場合は、空の新規プロジェクトで `supabase/setup.sql` を1回実行します。2本のマイグレーションをまとめたファイルです。既存プロジェクトには実行しないでください。
+SQL Editorから設定する場合は、空の新規プロジェクトで `supabase/setup.sql` を1回実行します。初期設定・JWT修正・端末追加対応をまとめたファイルです。既存プロジェクトには実行しないでください。
 
 ## 1. Supabaseを用意する
 
 1. Supabaseでチーム用プロジェクトを作り、Project URLとpublishable keyを控えます。
 2. AuthのAnonymous Sign-Insを有効にします。既存セッションがある場合はSDKが再利用します。公開前にAnonymous Authのレート制限を確認します。CAPTCHAを必須にする場合は、フロント側へのCAPTCHA組み込みも必要です。
-3. `supabase/migrations/20260911000000_v14.sql`、`20260911000100_import.sql`の順に適用します。SQL Editor、またはSupabase CLIの`supabase db push`を利用します。既存の同名テーブルがあるDBにはそのまま適用せず、空の移行先を使います。
+3. `supabase/migrations/` のSQLをファイル名順に適用します（初期設定、取り込み、JWT修正、端末追加対応）。SQL Editor、またはSupabase CLIの`supabase db push`を利用します。既存の同名テーブルがあるDBにはそのまま適用せず、空の移行先を使います。
 4. `supabase functions deploy team`と`supabase functions deploy maintenance`でEdge Functionsを配置します。`supabase/config.toml`を使用します。team・maintenanceとも、ダッシュボードの「Verify JWT with legacy secret」はOFFにします。teamは関数内のgetUserで毎回JWTと匿名ユーザーを検証し、maintenanceは専用キーを検証します。旧形式のゲートウェイ検証を無効にしても、関数内の認証は必須です。
 
 Edge FunctionのSecretsに以下を設定します。ローカルで入力する場合はGit管理外の`.env.supabase`を作り、`supabase secrets set --env-file .env.supabase`を実行します。
@@ -136,3 +138,9 @@ node --env-file=.env.verification scripts/verify-access.mjs
 適用用ファイル：`supabase/repair-attendance.sql`。全体がトランザクションで、途中失敗時は変更を確定しない。新規環境用setup.sqlにも同じ修正を組み込み済み。既存環境ではsetup.sqlを再実行せず、repair-attendance.sqlのみ使用する。
 
 authスキーマへの保存用ロールのアクセスを明示的に拒否し、PostgREST形式のJWT claimsを使うDBテスト18件が成功。クラウドへの適用と保存再確認は待機中。
+
+### 修正の実環境確認（2026年9月13日）
+
+ユーザーがrepair-attendance.sqlを実行した後、team Edge APIで本人の参加・10時参加・欠席・未回答への保存とDB反映が全て成功。他人の正式回答は403、申請者本人の仮回答保存と取得は成功、authenticatedの直接テーブルアクセスは引き続き42501で拒否された。検証用の選手・予定・申請・回答・匿名ユーザーを削除し、既存players/events/attendanceの全レコードが検証前後で一致することを確認した。
+
+画面確認用0912はユーザー操作の確認用として残している。9月12日の既存予定は9月13日以降は過去予定となり編集対象外なので、画面での保存確認には本日以降の確認用予定を使用する。

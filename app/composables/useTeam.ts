@@ -1,10 +1,10 @@
 import { callSupabase } from '~/utils/supabase'
-import type { RegistrationRequest, PendingAttendance } from '~/types/team'
+import type { RegistrationRequest, PendingAttendance, DeviceAccess } from '~/types/team'
 import type { AttendanceStatus, Player, TeamData, TeamEvent } from '~/types/team'
 import { createDemoData, createId, normalizeName, parseStoredData, setAnswer } from '~/utils/team'
 const STORAGE_KEY = 'south-dragons-demo-v1'
 const MY_PLAYERS_KEY = 'south-dragons-my-players-v1'
-type Snapshot = TeamData & { admin: boolean; adminConfigured: boolean; requests?: RegistrationRequest[]; pendingAttendance?: PendingAttendance[] }
+type Snapshot = TeamData & { admin: boolean; adminConfigured: boolean; requests?: RegistrationRequest[]; pendingAttendance?: PendingAttendance[]; accessModel?: string; deviceAccess?: DeviceAccess[] }
 const emptyData = (): TeamData => ({ version: 1, players: [], events: [], attendance: [], myPlayerIds: [] })
 export function useTeam() {
   const data = useState<TeamData>('team-data', emptyData)
@@ -16,11 +16,13 @@ export function useTeam() {
   const busy = ref(false)
   const requests = useState<RegistrationRequest[]>('registration-requests', () => [])
   const pendingAttendance = useState<PendingAttendance[]>('pending-attendance', () => [])
+  const multiDeviceAccess = useState('multi-device-access', () => false)
+  const deviceAccess = useState<DeviceAccess[]>('device-access', () => [])
   const isSupabase = computed(() => mode.value === 'supabase')
   const myPendingRequests = computed(() => requests.value.filter(r => r.isMine && r.status === 'pending'))
   const pendingRequestCount = computed(() => requests.value.filter(r => r.status === 'pending').length)
   function pendingRequest(playerId: string) { return myPendingRequests.value.find(r => r.playerId === playerId) }
-  function canEdit(playerId: string) { return !isSupabase.value || data.value.myPlayerIds.includes(playerId) || !!pendingRequest(playerId) }
+  function canEdit(playerId: string) { return !isSupabase.value || data.value.myPlayerIds.includes(playerId) || (!multiDeviceAccess.value && !!pendingRequest(playerId)) }
   const isDemo = computed(() => mode.value === 'demo')
   async function api<T>(action: string, payload: Record<string, unknown> = {}) {
     try {
@@ -36,6 +38,8 @@ export function useTeam() {
     const next = parseStoredData(JSON.stringify({ ...snapshot, myPlayerIds: ids }))
     data.value = next; admin.value = snapshot.admin; adminConfigured.value = snapshot.adminConfigured
     requests.value = snapshot.requests || []; pendingAttendance.value = snapshot.pendingAttendance || []
+    multiDeviceAccess.value = snapshot.accessModel === 'multi-device'
+    deviceAccess.value = snapshot.admin ? snapshot.deviceAccess || [] : []
   }
   function persist() {
     try {
@@ -89,11 +93,11 @@ export function useTeam() {
       apply(result.snapshot); return result
     })
   }
-  async function requestRegistration(playerId: string) {
-    return mutation(async () => { apply((await api<{snapshot: Snapshot}>('requestRegistration', {playerId})).snapshot) })
+  async function requestRegistration(playerId: string, applicantName = '', relation = '') {
+    return mutation(async () => { apply((await api<{snapshot: Snapshot}>('requestRegistration', {playerId, ...(multiDeviceAccess.value ? {applicantName, relation, accessModel: 'multi-device'} : {})})).snapshot) })
   }
   async function reviewRegistration(requestId: string, decision: 'approved' | 'rejected') {
-    return mutation(async () => { apply((await api<{snapshot: Snapshot}>('reviewRegistration', {requestId, decision})).snapshot) })
+    return mutation(async () => { apply((await api<{snapshot: Snapshot}>('reviewRegistration', {requestId, decision, ...(multiDeviceAccess.value ? {accessModel: 'multi-device'} : {})})).snapshot) })
   }
   function rememberPlayer(player: Player) {
     if (!player.active || isSupabase.value) return
@@ -105,8 +109,8 @@ export function useTeam() {
       if (isDemo.value) { setAnswer(data.value, eventId, playerId, status); persist() }
       else {
         const pending = pendingRequest(playerId)
-        const action = isSupabase.value && pending && !data.value.myPlayerIds.includes(playerId) ? 'savePendingAttendance' : 'saveAttendance'
-        apply((await api<{ snapshot: Snapshot }>(action, { eventId, playerId, status, requestId: pending?.id })).snapshot)
+        const action = isSupabase.value && !multiDeviceAccess.value && pending && !data.value.myPlayerIds.includes(playerId) ? 'savePendingAttendance' : 'saveAttendance'
+        apply((await api<{ snapshot: Snapshot }>(action, { eventId, playerId, status, requestId: multiDeviceAccess.value ? undefined : pending?.id })).snapshot)
       }
     })
   }
@@ -116,6 +120,9 @@ export function useTeam() {
       if (isDemo.value) { demo(); persist() }
       else apply((await api<{ snapshot: Snapshot }>(action, payload)).snapshot)
     })
+  }
+  async function revokeDeviceAccess(accessId: string) {
+    return adminMutation('revokeDeviceAccess', {accessId, accessModel: 'multi-device'}, () => {})
   }
   async function saveEvent(event: TeamEvent, create: boolean) {
     return adminMutation('saveEvent', { event, create }, () => {
@@ -154,5 +161,5 @@ export function useTeam() {
     })
   }
   onMounted(refresh)
-  return { isSupabase, requests, pendingAttendance, myPendingRequests, pendingRequestCount, pendingRequest, canEdit, requestRegistration, reviewRegistration, data, ready, storageError, mode, isDemo, busy, admin, adminConfigured, refresh, registerName, rememberPlayer, saveAttendance, saveEvent, setEventActive, setPlayerActive, renamePlayer, login, logout, changePassword }
+  return { isSupabase, multiDeviceAccess, deviceAccess, revokeDeviceAccess, requests, pendingAttendance, myPendingRequests, pendingRequestCount, pendingRequest, canEdit, requestRegistration, reviewRegistration, data, ready, storageError, mode, isDemo, busy, admin, adminConfigured, refresh, registerName, rememberPlayer, saveAttendance, saveEvent, setEventActive, setPlayerActive, renamePlayer, login, logout, changePassword }
 }

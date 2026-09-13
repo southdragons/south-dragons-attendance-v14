@@ -14,7 +14,7 @@
     "test": "vitest run",
     "build:sites": "nuxt build --preset cloudflare-module --dotenv .env.example && node scripts/stage-sites.mjs",
     "generate": "node scripts/check-public-config.mjs && nuxt generate",
-    "test:db": "vitest run tests/database.test.ts"
+    "test:db": "vitest run tests/database.test.ts tests/family-devices.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

@@ -3,10 +3,11 @@ const url=process.env.SUPABASE_URL,key=process.env.SUPABASE_PUBLISHABLE_KEY
 if(!url || !key) throw Error('Set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY; use the staging project first')
 const db=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}})
 const tables=['players','events','attendance','settings','re_registration_requests','pending_attendance']
+if(process.argv.includes('--multi-device')) tables.push('player_access')
 async function probe(jwt) {
   for(const table of tables) for(const method of ['GET','POST','PATCH','DELETE']) {
     const id=table==='settings'?'key':table.includes('registration') || table==='pending_attendance'?'request_id':'id'
-    const value=id==='request_id'?'00000000-0000-4000-8000-000000000000':'__permission_probe__'
+    const value=id==='request_id' || table==='player_access'?'00000000-0000-4000-8000-000000000000':'__permission_probe__'
     const path=`${url}/rest/v1/${table}${method==='GET'?'?select=*&limit=1':method==='PATCH'||method==='DELETE'?`?${id}=eq.${value}`:''}`
     const response=await fetch(path,{method,headers:{apikey:key,...(jwt?{Authorization:`Bearer ${jwt}`} : {}),'Content-Type':'application/json'},body:['POST','PATCH'].includes(method)?JSON.stringify({[id]:value}):undefined,signal:AbortSignal.timeout(15000)})
     const result=await response.json()
