@@ -4,6 +4,8 @@ export const statusOptions = [
   { value: 'late' as const, symbol: '△', label: '10時参加', short: '10時参加' },
   { value: 'absent' as const, symbol: '×', label: '欠席', short: '欠席' },
 ]
+// Keep saved late answers readable, but no longer offer them for new input.
+export const attendanceInputOptions = statusOptions.filter(option => option.value !== 'late')
 export function normalizeName(name: string) { return name.replace(/[\s\u3000]+/g, '') }
 export function createId() {
   // LAN HTTP previews do not expose crypto.randomUUID in every browser.
@@ -55,7 +57,7 @@ export function createDemoData(now = new Date()): TeamData {
   const attendance: Attendance[] = []
   events.forEach((event, ei) => players.forEach((player, pi) => {
     if ((pi + ei) % 5 === 0 || ei > 3) return
-    attendance.push({ eventId: event.id, playerId: player.id, status: (pi + ei) % 7 === 0 ? 'absent' : (pi + ei) % 4 === 0 ? 'late' : 'attend', updatedAt: now.toISOString() })
+    attendance.push({ eventId: event.id, playerId: player.id, status: (pi + ei) % 7 === 0 ? 'absent' : 'attend', updatedAt: now.toISOString() })
   }))
   return { version: 1, players, events, attendance, myPlayerIds: [] }
 }
