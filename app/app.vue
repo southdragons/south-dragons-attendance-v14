@@ -137,7 +137,7 @@ async function saveName() {
   <div>
     <header class="site-header">
       <div class="header-inner">
-        <button class="brand" aria-label="South Dragons 出欠確認へ" @click="view = 'attendance'"><span class="brand-mark">SD<span>★</span></span><span><strong>SOUTH DRAGONS</strong><small>南のグラウンドから、みんなで。</small></span></button>
+        <button class="brand" aria-label="South Dragons 出欠確認へ" @click="view = 'attendance'"><span class="brand-mark">SD<span>★</span></span><span><strong>SOUTH DRAGONS</strong><small>みんなの予定を、ひとつに。</small></span></button>
         <button class="btn btn-ghost manage-link" @click="openAdmin" :disabled="!ready || busy"><Settings2 :size="18" /><span>管理</span></button>
       </div>
       <nav class="nav-inner" aria-label="メインメニュー"><button :class="{ active: view === 'attendance' }" @click="view = 'attendance'"><ClipboardList :size="18" />出欠確認</button><button :class="{ active: view === 'admin' }" @click="openAdmin" :disabled="!ready || busy"><ShieldCheck :size="18" />チーム管理</button><span class="season-label">少年野球チーム</span></nav>
