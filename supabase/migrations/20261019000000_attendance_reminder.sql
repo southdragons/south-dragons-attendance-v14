@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS public.attendance_reminder_deliveries (
 ALTER TABLE public.attendance_reminder_deliveries ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.attendance_reminder_deliveries FROM PUBLIC, anon, authenticated;
 GRANT SELECT,INSERT,UPDATE ON public.attendance_reminder_deliveries TO service_role;
+REVOKE ALL ON SEQUENCE public.attendance_reminder_deliveries_id_seq FROM PUBLIC, anon, authenticated;
 GRANT USAGE,SELECT ON SEQUENCE public.attendance_reminder_deliveries_id_seq TO service_role;
 
 -- One atomic claim per calendar date and destination. An expired claim may be retried
