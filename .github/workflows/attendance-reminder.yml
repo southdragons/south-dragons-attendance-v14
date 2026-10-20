@@ -1,0 +1,35 @@
+name: South Dragons LINE attendance reminder
+on:
+  schedule:
+    # 19:00 JST = 10:00 UTC; Friday and Saturday only.
+    # GitHub Actions scheduled jobs may be delayed.
+    - cron: '0 10 * * 5,6'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  # Never run two reminder jobs at the same time.
+  group: attendance-reminder
+  cancel-in-progress: false
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Invoke protected Supabase function
+        env:
+          REMINDER_URL: ${{ secrets.REMINDER_FUNCTION_URL }}
+          REMINDER_SECRET: ${{ secrets.REMINDER_CRON_SECRET }}
+          SCHEDULE_ENABLED: ${{ secrets.REMINDER_SCHEDULE_ENABLED }}
+        run: |
+          # Safe by default: merging this workflow must NOT start sending reminders.
+          if [ "$SCHEDULE_ENABLED" != "true" ]; then
+            echo "Reminder scheduler is disabled."
+            exit 0
+          fi
+          test -n "$REMINDER_URL" && test -n "$REMINDER_SECRET"
+          curl --fail-with-body --retry 2 --retry-delay 20 --max-time 30 \
+            -X POST "$REMINDER_URL" \
+            -H "Authorization: Bearer $REMINDER_SECRET" \
+            -H 'Content-Type: application/json' \
+            --data '{}'
