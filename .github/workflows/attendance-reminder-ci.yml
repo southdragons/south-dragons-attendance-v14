@@ -26,6 +26,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
+      # Deno resolves npm: imports from node_modules because package.json exists,
+      # so install the locked dependencies first (same as pages.yml).
+      - run: npm ci
       - name: Message tests
         run: node --test tests/attendance-reminder.test.mjs
       - name: Type-check Edge Function
