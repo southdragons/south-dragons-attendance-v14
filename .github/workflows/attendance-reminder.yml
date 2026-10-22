@@ -13,21 +13,27 @@ concurrency:
   cancel-in-progress: false
 jobs:
   notify:
+    # Safe by default: the whole job is skipped unless the repository variable
+    # REMINDER_SCHEDULE_ENABLED is exactly 'true'. Merging this file sends nothing.
+    if: vars.REMINDER_SCHEDULE_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Invoke protected Supabase function
         env:
+          SCHEDULE_ENABLED: ${{ vars.REMINDER_SCHEDULE_ENABLED }}
           REMINDER_URL: ${{ secrets.REMINDER_FUNCTION_URL }}
           REMINDER_SECRET: ${{ secrets.REMINDER_CRON_SECRET }}
-          SCHEDULE_ENABLED: ${{ secrets.REMINDER_SCHEDULE_ENABLED }}
         run: |
-          # Safe by default: merging this workflow must NOT start sending reminders.
+          # Second guard, in case the job condition is ever edited.
           if [ "$SCHEDULE_ENABLED" != "true" ]; then
             echo "Reminder scheduler is disabled."
             exit 0
           fi
-          test -n "$REMINDER_URL" && test -n "$REMINDER_SECRET"
+          if [ -z "$REMINDER_URL" ] || [ -z "$REMINDER_SECRET" ]; then
+            echo "::error::REMINDER_FUNCTION_URL and REMINDER_CRON_SECRET secrets are required."
+            exit 1
+          fi
           curl --fail-with-body --retry 2 --retry-delay 20 --max-time 30 \
             -X POST "$REMINDER_URL" \
             -H "Authorization: Bearer $REMINDER_SECRET" \

@@ -13,7 +13,7 @@
 | 関数名を付けない `supabase functions deploy` | `team` を含むすべての関数が再デプロイされる |
 | `--prune` オプション | 手元にない関数がリモートから削除される |
 | `supabase link` | 不要。毎回 `--project-ref` を付けて実行する。リンクしておくと、誤って `db push` してしまう恐れがある |
-| `REMINDER_PROD_*`、`REMINDER_PRODUCTION_ENABLED`、GitHubの `REMINDER_SCHEDULE_ENABLED` の登録 | 本番への切り替えは、ユーザーの指示を受けてから行う |
+| `REMINDER_PROD_*`、`REMINDER_PRODUCTION_ENABLED` の登録、GitHubの Repository variable `REMINDER_SCHEDULE_ENABLED` の作成 | 本番への切り替えは、ユーザーの指示を受けてから行う |
 
 ## 1. 事前準備（Supabase CLI）
 
@@ -243,6 +243,18 @@ where target_date='YYYY-MM-DD' and destination='test' and state='processing';
 
 ## 7. このあとの段階（今回は行わない）
 
-- GitHub Secretsに `REMINDER_FUNCTION_URL` と `REMINDER_CRON_SECRET` を登録する。`REMINDER_SCHEDULE_ENABLED` は登録しない。
+- GitHub Secretsに `REMINDER_FUNCTION_URL` と `REMINDER_CRON_SECRET` を登録する。
+- 定時実行のスイッチは、Secretsではなく **Repository variables**（Settings → Secrets and variables → Actions → Variables）の `REMINDER_SCHEDULE_ENABLED` で切り替える。
+  - 未作成、または `true` 以外：ジョブ全体がスキップされ、Secretsも読み込まれない（初期状態）。
+  - ちょうど `true`：金・土 19:00 JST に関数を呼ぶ。Secretsが足りない場合はエラーで止まり、送信しない。
+  - 有効にする前に `workflow_dispatch` で手動実行し、ジョブが「skipped」になることを確認する。
+  - 止めたいときは、値を `false` にするか、variableを削除する。
 - mainへのPRとマージ。定時実行は、mainにマージされたワークフローでしか動かない。
 - 本番LINEへの切り替え：`REMINDER_PROD_*`、`REMINDER_DESTINATION=production`、`REMINDER_PRODUCTION_ENABLED=true` を設定する。
+
+## 8. CI
+
+`.github/workflows/attendance-reminder-ci.yml` が、通知機能のファイルが変わったPRと、mainへのpushのときに、次の2つを実行する。Secretsは使わず、`pages.yml`（公開サイトのデプロイ）とは別に動く。
+
+- `node --test tests/attendance-reminder.test.mjs`
+- `npx --yes deno@2.9.6 check supabase/functions/attendance-reminder/index.ts`
