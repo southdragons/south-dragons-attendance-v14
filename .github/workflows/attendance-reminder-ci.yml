@@ -1,0 +1,36 @@
+name: Attendance reminder checks
+# Checks for the LINE attendance reminder only. Separate from pages.yml so a
+# failure here never blocks the site deploy. Uses no secrets and sends nothing.
+on:
+  pull_request:
+    paths:
+      - 'supabase/functions/attendance-reminder/**'
+      - 'tests/attendance-reminder.test.mjs'
+      - '.github/workflows/attendance-reminder.yml'
+      - '.github/workflows/attendance-reminder-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/attendance-reminder/**'
+      - 'tests/attendance-reminder.test.mjs'
+      - '.github/workflows/attendance-reminder.yml'
+      - '.github/workflows/attendance-reminder-ci.yml'
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      # Deno resolves npm: imports from node_modules because package.json exists,
+      # so install the locked dependencies first (same as pages.yml).
+      - run: npm ci
+      - name: Message tests
+        run: node --test tests/attendance-reminder.test.mjs
+      - name: Type-check Edge Function
+        run: npx --yes deno@2.9.6 check supabase/functions/attendance-reminder/index.ts
