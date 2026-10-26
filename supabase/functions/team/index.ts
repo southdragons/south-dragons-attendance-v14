@@ -1,9 +1,12 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0'
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
+import { ipKeyFrom, rotateTeamCode, verifyTeamCode } from './teamcode.ts'
 
 const url = Deno.env.get('SUPABASE_URL')!
 const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false, autoRefreshToken: false } })
-const actions = new Set(['getData','registerPlayer','saveAttendance','savePendingAttendance','requestRegistration','reviewRegistration','revokeDeviceAccess','saveEvent','setEventActive','renamePlayer','setPlayerActive','adminLogin','initializeAdmin','changeAdminPassword','adminLogout'])
+const actions = new Set(['getData','registerPlayer','saveAttendance','savePendingAttendance','requestRegistration','reviewRegistration','revokeDeviceAccess','saveEvent','setEventActive','renamePlayer','setPlayerActive','adminLogin','initializeAdmin','changeAdminPassword','adminLogout',
+  // Team code. teamCodePrepare is internal and deliberately not callable from the browser.
+  'verifyTeamCode','rotateTeamCode','setTeamCodeEnforcement','revokeTeamMembers','revokeTeamMember','addCurrentDeviceAsMember','setFeatureFlag'])
 const errors: Record<string, [number,string]> = {
   UNAUTHORIZED: [401,'管理画面への再ログイン、またはページの再読み込みをお願いします。'],
   FORBIDDEN: [403,'この端末では、この選手の出欠を変更できません。利用申請の承認状況を確認してください。'],
@@ -17,6 +20,8 @@ const errors: Record<string, [number,string]> = {
   NOT_EDITABLE: [409,'過去の予定、非表示の予定、退団した選手には回答できません。'],
   NOT_FOUND: [404,'対象が見つかりません。'],
   RATE_LIMITED: [429,'試行回数が多いため、時間をおいて再試行してください。'],
+  TEAM_CODE_REQUIRED: [403,'チームコードの入力が必要です。ページを再読み込みして、チームコードを入力してください。'],
+  TEAM_CODE_INVALID: [400,'チームコードを確認できませんでした。入力内容を確認してください。'],
 }
 function equal(a: string, b: string) { const x=new TextEncoder().encode(a), y=new TextEncoder().encode(b); return x.length===y.length && timingSafeEqual(x,y) }
 function proof(password: string, salt: string): Promise<string> {
@@ -74,6 +79,9 @@ Deno.serve(async (request: Request) => {
       const {error}=await scoped.rpc('save_own_attendance',{p_event:p.eventId,p_player:p.playerId,p_status:p.status,p_comment:p.comment || '',p_request:action==='savePendingAttendance'?p.requestId:null})
       if(error) throw error
       result={snapshot:await rpc(user.id,'getData',{},token)}
+    } else if(action==='verifyTeamCode' || action==='rotateTeamCode') {
+      const call=(name:string,payload:Record<string,unknown>={})=>rpc(user.id,name,payload,token)
+      result=action==='verifyTeamCode' ? await verifyTeamCode(call,p,await ipKeyFrom(request,key=>Deno.env.get(key))) : await rotateTeamCode(call,p)
     } else if(['adminLogin','initializeAdmin','changeAdminPassword'].includes(action)) {
       if(typeof p.password!=='string' || p.password.length>128 || p.password.length<(action==='adminLogin'?1:12)) throw new Error('BAD_REQUEST')
       const config=await rpc(user.id,'authPrepare')
@@ -101,8 +109,10 @@ Deno.serve(async (request: Request) => {
     return response(result)
   } catch(error) {
     const e=error as {message?:string;code?:string}
-    const known=errors[e.message || ''] || (['23514','23502','22007','22008','22P02','22001'].includes(e.code || '')?errors.BAD_REQUEST:e.code==='23505'?errors.CONFLICT:e.code==='42501'?errors.FORBIDDEN:undefined)
+    const key=errors[e.message || ''] ? e.message! : (['23514','23502','22007','22008','22P02','22001'].includes(e.code || '')?'BAD_REQUEST':e.code==='23505'?'CONFLICT':e.code==='42501'?'FORBIDDEN':undefined)
+    const known=key ? errors[key] : undefined
     if(!known) console.error('team_request_failed',e.code || 'unknown')
-    return response({message:known?.[1] || '通信結果を確認できません。更新して保存結果を確認してください。'},known?.[0] || 502)
+    // `code` lets new clients react (e.g. show the team code screen); old clients only read `message`.
+    return response({message:known?.[1] || '通信結果を確認できません。更新して保存結果を確認してください。',...(key ? {code:key} : {})},known?.[0] || 502)
   }
 })

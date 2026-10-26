@@ -32,10 +32,17 @@ export async function callSupabase<T>(action: string, payload: Record<string, un
   const { data, error } = await db.functions.invoke('team', { body: { action, payload, adminToken } })
   if (error) {
     let message = '通信結果を確認できません。更新して保存結果を確認してください。'
+    let code: string | undefined
     const status = error.context?.status
-    try { message = (await error.context?.json())?.message || message } catch {}
+    try {
+      const body = await error.context?.json()
+      code = typeof body?.code === 'string' ? body.code : undefined
+      // Only show text from our own function (it sends `code`) or a 4xx; gateway/platform 5xx bodies are not for users.
+      if (body?.message && (code || (status && status < 500))) message = body.message
+    } catch {}
     if (status === 401) adminToken = ''
-    throw Object.assign(new Error(message), { statusCode: status, data: { message } })
+    // No HTTP status means the request never got an answer (offline, timeout).
+    throw Object.assign(new Error(message), { statusCode: status, data: { message, code: code || (status ? undefined : 'NETWORK') } })
   }
   if (typeof data?.adminToken === 'string') adminToken = data.adminToken
   if (action === 'adminLogout' || action === 'changeAdminPassword' || (action === 'getData' && !data.admin)) adminToken = ''
