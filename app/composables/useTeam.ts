@@ -1,11 +1,17 @@
 import { callSupabase } from '~/utils/supabase'
-import type { RegistrationRequest, PendingAttendance, DeviceAccess } from '~/types/team'
+import type { RegistrationRequest, PendingAttendance, DeviceAccess, TeamCodeStatus, TeamMember, TeamMemberCounts } from '~/types/team'
 import type { AttendanceStatus, Player, TeamData, TeamEvent } from '~/types/team'
 import { createDemoData, createId, normalizeName, parseStoredData, setAnswer } from '~/utils/team'
 const STORAGE_KEY = 'south-dragons-demo-v1'
 const MY_PLAYERS_KEY = 'south-dragons-my-players-v1'
-type Snapshot = TeamData & { admin: boolean; adminConfigured: boolean; requests?: RegistrationRequest[]; pendingAttendance?: PendingAttendance[]; accessModel?: string; deviceAccess?: DeviceAccess[] }
+type Snapshot = TeamData & { admin: boolean; adminConfigured: boolean; requests?: RegistrationRequest[]; pendingAttendance?: PendingAttendance[]; accessModel?: string; deviceAccess?: DeviceAccess[]
+  teamCode?: TeamCodeStatus; teamMembers?: TeamMember[]; teamMemberCounts?: TeamMemberCounts; featureFlags?: Record<string, boolean> }
+export type TeamError = Error & { code?: string; statusCode?: number }
 const emptyData = (): TeamData => ({ version: 1, players: [], events: [], attendance: [], myPlayerIds: [] })
+// Re-check view access when the app comes back to the foreground, at most once per minute.
+export const RESUME_RECHECK_MS = 60_000
+export const PARENT_SESSION_MESSAGE = 'この端末の確認ができませんでした。ページを再読み込みしてください。直らない場合は、チームの運営者にお知らせください。'
+let resumeListenersAttached = false
 export function useTeam() {
   const data = useState<TeamData>('team-data', emptyData)
   const ready = useState('team-ready', () => false)
@@ -18,6 +24,13 @@ export function useTeam() {
   const pendingAttendance = useState<PendingAttendance[]>('pending-attendance', () => [])
   const multiDeviceAccess = useState('multi-device-access', () => false)
   const deviceAccess = useState<DeviceAccess[]>('device-access', () => [])
+  // Team code: true while this device must enter the code. All roster data is cleared meanwhile.
+  const teamCodeRequired = useState('team-code-required', () => false)
+  const teamCode = useState<TeamCodeStatus | null>('team-code-status', () => null)
+  const teamMembers = useState<TeamMember[]>('team-members', () => [])
+  const teamMemberCounts = useState<TeamMemberCounts | null>('team-member-counts', () => null)
+  const featureFlags = useState<Record<string, boolean>>('feature-flags', () => ({}))
+  const lastServerContact = useState('last-server-contact', () => 0)
   const isSupabase = computed(() => mode.value === 'supabase')
   const myPendingRequests = computed(() => requests.value.filter(r => r.isMine && r.status === 'pending'))
   const pendingRequestCount = computed(() => requests.value.filter(r => r.status === 'pending').length)
@@ -25,13 +38,27 @@ export function useTeam() {
   function canEdit(playerId: string) { return !isSupabase.value || data.value.myPlayerIds.includes(playerId) || (!multiDeviceAccess.value && !!pendingRequest(playerId)) }
   const isDemo = computed(() => mode.value === 'demo')
   async function api<T>(action: string, payload: Record<string, unknown> = {}) {
+    lastServerContact.value = Date.now()
+    const wasAdmin = admin.value
     try {
       if (isSupabase.value) return await callSupabase<T>(action, payload)
       return await $fetch<T>('/api/team', { method: 'POST', body: { action, payload }, headers: { 'X-South-Dragons': '1' }, retry: 0, timeout: 55000 }) }
     catch (error: any) {
       if (error.statusCode === 401 || error.status === 401) admin.value = false
-      throw new Error(error.data?.message || error.data?.statusMessage || (isSupabase.value && error.message) || '通信結果を確認できません。再読み込みしてから再試行してください。')
+      const code = error.data?.code as string | undefined
+      if (code === 'TEAM_CODE_REQUIRED') lockForTeamCode()
+      // The server's 401 text speaks to admins; parents get a plain instruction instead.
+      const parentAuth = isSupabase.value && code === 'UNAUTHORIZED' && !wasAdmin
+      throw Object.assign(new Error(parentAuth ? PARENT_SESSION_MESSAGE : error.data?.message || error.data?.statusMessage || (isSupabase.value && error.message) || '通信結果を確認できません。再読み込みしてから再試行してください。'), { code, statusCode: error.statusCode ?? error.status }) as TeamError
     }
+  }
+  function lockForTeamCode() {
+    // Drop everything the device saw before; nothing about the team stays on screen.
+    teamCodeRequired.value = true; admin.value = false
+    data.value = emptyData(); requests.value = []; pendingAttendance.value = []; deviceAccess.value = []
+    teamCode.value = null; teamMembers.value = []; teamMemberCounts.value = null; featureFlags.value = {}
+    // Enforcement can only be on after an admin issued a code, so admin sign-in is configured.
+    adminConfigured.value = true; ready.value = true; storageError.value = ''
   }
   function apply(snapshot: Snapshot) {
     const ids = isSupabase.value ? snapshot.myPlayerIds : data.value.myPlayerIds
@@ -40,6 +67,11 @@ export function useTeam() {
     requests.value = snapshot.requests || []; pendingAttendance.value = snapshot.pendingAttendance || []
     multiDeviceAccess.value = snapshot.accessModel === 'multi-device'
     deviceAccess.value = snapshot.admin ? snapshot.deviceAccess || [] : []
+    teamCodeRequired.value = false
+    teamCode.value = snapshot.admin ? snapshot.teamCode || null : null
+    teamMembers.value = snapshot.admin ? snapshot.teamMembers || [] : []
+    teamMemberCounts.value = snapshot.admin ? snapshot.teamMemberCounts || null : null
+    featureFlags.value = snapshot.admin ? snapshot.featureFlags || {} : {}
   }
   function persist() {
     try {
@@ -73,7 +105,7 @@ export function useTeam() {
         apply(await api<Snapshot>('getData'))
       }
       ready.value = true; storageError.value = ''
-    } catch (error: any) { storageError.value = error.message || 'データを読み込めませんでした。再読み込みしてください。' }
+    } catch (error: any) { if (!teamCodeRequired.value) storageError.value = error.message || 'データを読み込めませんでした。再読み込みしてください。' }
     finally { busy.value = false }
   }
   async function mutation<T>(work: () => Promise<T>) {
@@ -150,9 +182,28 @@ export function useTeam() {
     await mutation(async () => {
       if (!isDemo.value) await api('adminLogout')
       admin.value = false
-      if (!isDemo.value) apply(await api<Snapshot>('getData'))
+      if (!isDemo.value) {
+        try { apply(await api<Snapshot>('getData')) }
+        catch (error) { if ((error as TeamError).code !== 'TEAM_CODE_REQUIRED') throw error } // device is not a member: code screen
+      }
     })
   }
+  async function verifyTeamCode(code: string, label = '') {
+    return mutation(async () => { apply((await api<{ snapshot: Snapshot }>('verifyTeamCode', { code, label })).snapshot) })
+  }
+  // The issued code is returned to the caller only and never kept in shared state.
+  async function rotateTeamCode(graceHours: number) {
+    return mutation(async () => {
+      if (!admin.value) throw new Error('管理画面にログインしてください。')
+      const result = await api<{ teamCode: string; snapshot: Snapshot }>('rotateTeamCode', { graceHours })
+      apply(result.snapshot); return result.teamCode
+    })
+  }
+  const setTeamCodeEnforcement = (on: boolean) => adminMutation('setTeamCodeEnforcement', { enforcement: on ? 'on' : 'off' }, () => {})
+  const revokeTeamMembers = (scope: 'unbound' | 'all') => adminMutation('revokeTeamMembers', { scope }, () => {})
+  const revokeTeamMember = (memberId: string) => adminMutation('revokeTeamMember', { memberId }, () => {})
+  const addCurrentDeviceAsMember = () => adminMutation('addCurrentDeviceAsMember', {}, () => {})
+  const setAbuseLimits = (enabled: boolean) => adminMutation('setFeatureFlag', { name: 'abuse_limits', enabled }, () => {})
   async function changePassword(currentPassword: string, password: string) {
     await mutation(async () => {
       if (isDemo.value) throw new Error('パスワード変更は共有先への接続後に利用できます。')
@@ -160,6 +211,23 @@ export function useTeam() {
       admin.value = false
     })
   }
-  onMounted(refresh)
-  return { isSupabase, multiDeviceAccess, deviceAccess, revokeDeviceAccess, requests, pendingAttendance, myPendingRequests, pendingRequestCount, pendingRequest, canEdit, requestRegistration, reviewRegistration, data, ready, storageError, mode, isDemo, busy, admin, adminConfigured, refresh, registerName, rememberPlayer, saveAttendance, saveEvent, setEventActive, setPlayerActive, renamePlayer, login, logout, changePassword }
+  // Background re-check (app resumed). Only a definite TEAM_CODE_REQUIRED changes the screen (api() locks it);
+  // network/server failures leave what is shown untouched, so going offline never looks like a revocation.
+  async function revalidate(now = Date.now()) {
+    if (!isSupabase.value || !ready.value || busy.value || teamCodeRequired.value) return false
+    if (now - lastServerContact.value < RESUME_RECHECK_MS) return false
+    busy.value = true
+    try { apply(await api<Snapshot>('getData')) } catch {}
+    finally { busy.value = false }
+    return true
+  }
+  onMounted(() => {
+    refresh()
+    if (resumeListenersAttached || typeof document === 'undefined') return
+    resumeListenersAttached = true
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') revalidate() })
+    window.addEventListener('pageshow', event => { if ((event as PageTransitionEvent).persisted) revalidate() })
+  })
+  return { revalidate, teamCodeRequired, teamCode, teamMembers, teamMemberCounts, featureFlags, verifyTeamCode, rotateTeamCode, setTeamCodeEnforcement, revokeTeamMembers, revokeTeamMember, addCurrentDeviceAsMember, setAbuseLimits,
+    isSupabase, multiDeviceAccess, deviceAccess, revokeDeviceAccess, requests, pendingAttendance, myPendingRequests, pendingRequestCount, pendingRequest, canEdit, requestRegistration, reviewRegistration, data, ready, storageError, mode, isDemo, busy, admin, adminConfigured, refresh, registerName, rememberPlayer, saveAttendance, saveEvent, setEventActive, setPlayerActive, renamePlayer, login, logout, changePassword }
 }

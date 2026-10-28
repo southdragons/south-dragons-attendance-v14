@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ArrowRight, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Clock3, Info, LogOut, MapPin, Plus, RefreshCw, Settings2, ShieldCheck, Users } from 'lucide-vue-next'
-import type { AttendanceStatus, DeviceAccess, Player, TeamEvent } from '~/types/team'
+import { ArrowRight, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Clock3, Copy, Info, KeyRound, LogOut, MapPin, Plus, RefreshCw, Settings2, ShieldCheck, Users } from 'lucide-vue-next'
+import type { AttendanceStatus, DeviceAccess, Player, TeamEvent, TeamMember } from '~/types/team'
+import type { TeamError } from '~/composables/useTeam'
 import { attendanceInputOptions, countsFor, createId, dateLabel, localDate, normalizeName, statusOptions, visiblePlayers } from '~/utils/team'
 const team = useTeam()
-const { multiDeviceAccess, deviceAccess, data, ready, storageError, isDemo, isSupabase, busy, admin, adminConfigured, requests, pendingAttendance, myPendingRequests, pendingRequestCount } = team
+const { multiDeviceAccess, deviceAccess, data, ready, storageError, isDemo, isSupabase, busy, admin, adminConfigured, requests, pendingAttendance, myPendingRequests, pendingRequestCount, teamCodeRequired, teamCode, teamMembers, teamMemberCounts, featureFlags } = team
 const view = ref<'attendance' | 'admin'>('attendance')
 watch(admin, value => { if (!value) view.value = 'attendance' })
 const history = ref(false)
@@ -33,7 +34,7 @@ const notice = ref('')
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
 onBeforeUnmount(() => clearTimeout(noticeTimer))
 function notify(message: string) { notice.value = message; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => notice.value = '', 4000) }
-async function perform(work: () => Promise<void>) { actionError.value = ''; try { await work() } catch (error) { actionError.value = (error as Error).message } }
+async function perform(work: () => Promise<void>) { actionError.value = ''; try { await work() } catch (error) { if (!teamCodeRequired.value) actionError.value = (error as Error).message } } // the code screen explains itself
 function status(eventId: string, playerId: string) {
   const pending = multiDeviceAccess.value ? undefined : team.pendingRequest(playerId)
   const draft = pendingAttendance.value.find(a => a.requestId === pending?.id && a.eventId === eventId)
@@ -77,7 +78,7 @@ function reviewRequest(id: string, playerName: string, decision: 'approved' | 'r
 }
 function usePlayer(player: Player) { if (!player.active) return; team.rememberPlayer(player); registration.value = false; notify(`${player.name}さんを登録しました`) }
 const adminEntry = ref(false)
-const adminTab = ref<'events' | 'players' | 'requests' | 'password'>('events')
+const adminTab = ref<'events' | 'players' | 'requests' | 'password' | 'teamcode'>('events')
 const showRetired = ref(false)
 const managedPlayers = computed(() => data.value.players.filter(p => showRetired.value || p.active))
 const adminMonth = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
@@ -137,6 +138,85 @@ async function saveName() {
   if (data.value.players.some(p => p.id !== id && normalizeName(p.name) === normalized)) { formError.value = '同じ名前の選手が登録されています。'; return }
   await perform(async () => { await team.renamePlayer(id, editName.value.trim()); editingPlayer.value = null; notify('名前を変更しました') })
 }
+
+// When this device loses (or never had) view access, close every dialog that may still hold
+// a player, event or device from before. The one-time issued code holds no roster data and stays.
+watch(teamCodeRequired, required => {
+  if (!required) return
+  selected.value = null; detail.value = null; registration.value = false; duplicate.value = null
+  devicePlayer.value = null; editingPlayer.value = null; eventEditor.value = false; confirmAction.value = null
+  actionError.value = ''; view.value = 'attendance'
+})
+
+// --- Team code: entry screen (shown instead of all team data until the device enters the code)
+const codeInput = ref('')
+const codeLabel = ref('')
+const codeError = ref('')
+const inLineApp = ref(false)
+onMounted(() => {
+  inLineApp.value = /\bLine\//i.test(navigator.userAgent)
+  // #join= links are not auto-filled (the original URL may stay in browser history).
+  // Remove it from the address bar so it is not bookmarked, shared or added to the home screen.
+  if (/(^#|&)join=/.test(location.hash)) window.history.replaceState(window.history.state, '', location.pathname + location.search)
+})
+function codeErrorMessage(error: TeamError) {
+  if (error.code === 'TEAM_CODE_INVALID') return 'チームコードが正しくありません。チームLINEのお知らせを確認して、もう一度入力してください。'
+  if (error.code === 'RATE_LIMITED') return '入力の回数が多すぎます。15分ほど待ってから、もう一度お試しください。'
+  if (error.code === 'NETWORK') return '通信できませんでした。電波の良い場所で、もう一度お試しください。'
+  if (!error.code && (error.statusCode ?? 0) >= 500) return 'サーバーが一時的に応答していません。しばらくしてから、もう一度お試しください。'
+  if (error.code === 'BAD_REQUEST') return '入力内容を確認してください（お名前・続柄は30文字までです）。'
+  return error.message
+}
+async function submitCode() {
+  codeError.value = ''
+  if (!codeInput.value.trim()) { codeError.value = 'チームコードを入力してください。'; return }
+  try {
+    await team.verifyTeamCode(codeInput.value, codeLabel.value.trim())
+    codeInput.value = ''; codeLabel.value = ''; view.value = 'attendance'; notify('チームコードを確認しました')
+  } catch (error) { codeError.value = codeErrorMessage(error as TeamError) }
+}
+
+// --- Team code: admin management
+// Shown once; cannot be dismissed until the admin confirms the code was saved.
+const { code: issuedCode, acknowledged: codeAcknowledged, copied: codeCopied, copyError: codeCopyError, open: issuedOpen, canClose: issuedCanClose, show: showIssuedCode, copy: copyIssuedCode, close: closeIssuedCode } = useIssuedCode()
+const graceHours = ref(0)
+const enforced = computed(() => teamCode.value?.enforcement === 'on')
+const memberTotal = computed(() => teamMembers.value.length)
+const methodLabel = (method: TeamMember['method']) => ({ code: 'コード入力', existing_access: '登録済みの端末', admin: '管理者の端末' })[method]
+const formatTime = (value: string | null | undefined) => value ? new Date(value).toLocaleString('ja-JP', { dateStyle: 'short', timeStyle: 'short' }) : '—'
+function confirmRotate() {
+  actionError.value = ''
+  const issued = !!teamCode.value?.issued
+  confirmAction.value = {
+    title: issued ? 'チームコードを変更しますか？' : 'チームコードを発行しますか？',
+    message: issued
+      ? `${graceHours.value ? '前のコードは24時間後に使えなくなります。' : '前のコードはすぐに使えなくなります。'}すでにコードを入力した端末と、出欠を入力できる端末は、そのまま使えます。新しいコードは一度だけ表示されます。`
+      : '新しいコードは一度だけ表示されます。閲覧制限は、コードの発行後に別の操作で有効にします。',
+    label: issued ? '変更する' : '発行する',
+    action: async () => { showIssuedCode(await team.rotateTeamCode(graceHours.value)) },
+  }
+}
+function confirmEnforcement(on: boolean) {
+  actionError.value = ''
+  confirmAction.value = on
+    ? { title: '閲覧制限を有効にしますか？', message: 'チームコードを入力した端末だけが、選手・予定・出欠を見られるようになります。出欠を入力できる端末（登録済み・承認済み）は、そのまま使えます。閲覧だけの端末には、コードの入力画面が表示されます。', label: '有効にする', action: async () => { await team.setTeamCodeEnforcement(true); notify('閲覧制限を有効にしました') } }
+    : { title: '閲覧制限を無効にしますか？', message: 'URLを知っている人は、コードなしで選手・予定・出欠を見られるようになります（従来の動作）。', label: '無効にする', action: async () => { await team.setTeamCodeEnforcement(false); notify('閲覧制限を無効にしました') } }
+}
+function confirmRevokeMembers(scope: 'unbound' | 'all') {
+  actionError.value = ''
+  confirmAction.value = scope === 'unbound'
+    ? { title: '選手を登録していない端末の閲覧を停止しますか？', message: '出欠を入力できない端末（閲覧だけの端末）は、次に開いたときにチームコードの入力が必要になります。出欠を入力できる端末と、端末共有は変わりません。', label: '停止する', action: async () => { await team.revokeTeamMembers('unbound'); notify('閲覧だけの端末を停止しました') } }
+    : { title: 'すべての端末にコードの再入力を求めますか？', message: 'コードが漏れたときの対応です。すべての端末で、次に開いたときにチームコードの入力が必要になります。出欠の入力権限と端末共有は残るため、承認のやり直しは不要です。先にコードを変更してください。', label: '再入力を求める', action: async () => { await team.revokeTeamMembers('all'); notify('すべての端末にコードの再入力を求めました') } }
+}
+function confirmRevokeMember(member: TeamMember) {
+  actionError.value = ''
+  confirmAction.value = { title: 'この端末の閲覧権限を取り消しますか？', message: `「${member.label || methodLabel(member.method)}」は、次に開いたときにチームコードの入力が必要になります。出欠の入力権限は「参加者管理」の「利用端末」で別に管理します。${member.isCurrentDevice ? '今お使いの端末が対象です。' : ''}`, label: '取り消す', action: async () => { await team.revokeTeamMember(member.id); notify('閲覧権限を取り消しました') } }
+}
+function confirmAbuseLimits(on: boolean) {
+  actionError.value = ''
+  confirmAction.value = { title: on ? '申請・登録の上限を有効にしますか？' : '申請・登録の上限を無効にしますか？', message: on ? '端末追加の申請（選手1人につき承認待ち3件まで）、管理者へのLINE通知（1時間10件・1日30件まで）、選手の新規登録（1台1日5人まで）に上限がかかります。' : '上限をなくし、従来の動作に戻します。', label: on ? '有効にする' : '無効にする', action: async () => { await team.setAbuseLimits(on); notify(on ? '上限を有効にしました' : '上限を無効にしました') } }
+}
+async function addThisDevice() { await perform(async () => { await team.addCurrentDeviceAsMember(); notify('この端末を閲覧できる端末に追加しました') }) }
 </script>
 
 
@@ -154,7 +234,23 @@ async function saveName() {
       <div v-if="ready" class="demo-label"><span class="demo-dot" />{{ isDemo ? 'デモモード' : 'チーム共有' }}<span class="demo-description">{{ isDemo ? 'サンプルデータ・変更はこのブラウザ内に保存' : 'South Dragons_J.B.C. 出欠管理' }}</span><button v-if="!isDemo" class="btn btn-ghost btn-sm ml-auto" :disabled="busy" @click="team.refresh"><RefreshCw :size="15" />更新</button></div>
       <div v-if="storageError" role="alert" class="alert alert-warning mb-5"><span>{{ storageError }}</span><button class="btn btn-sm" :disabled="busy" @click="team.refresh">再読み込み</button></div>
       <div v-if="actionError && !adminEntry && !registration && !selected && !eventEditor && !editingPlayer && !confirmAction" role="alert" class="alert alert-warning mb-5">{{ actionError }}</div>
-      <template v-if="view === 'attendance'">
+      <template v-if="view === 'attendance' && teamCodeRequired">
+        <section class="team-code-card card" aria-labelledby="team-code-title">
+          <div class="join-icon"><KeyRound :size="24" /></div>
+          <h1 id="team-code-title">チームコードを入力してください</h1>
+          <p class="form-description">チームLINEのお知らせに書かれている、「SD-」で始まるコードです。</p>
+          <div v-if="inLineApp" class="alert alert-warning mb-4" role="note">LINEアプリの中で開いています。右上のメニューから「ブラウザで開く」を選んでから入力してください。LINEの中で入力すると、次にブラウザで開いたときにもう一度入力が必要です。</div>
+          <form class="event-form" @submit.prevent="submitCode">
+            <label class="form-field">チームコード<input v-model="codeInput" class="input team-code-input" placeholder="SD-XXXX-XXXX" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="24" required /></label>
+            <label class="form-field">お名前・続柄 <span class="optional">任意</span><input v-model="codeLabel" class="input" maxlength="30" placeholder="例：山田（母）" autocomplete="off" /><span class="text-xs font-normal">管理者が端末を見分けるために使います。</span></label>
+            <p v-if="codeError" class="field-error" role="alert">{{ codeError }}</p>
+            <button class="btn btn-primary w-full" type="submit" :disabled="busy">{{ busy ? '確認しています…' : '確認する' }}</button>
+          </form>
+          <ul class="team-code-notes"><li>この端末では、次回から入力は不要です。</li><li>iPhoneは、ホーム画面に追加してから、そのアイコンで開いて入力してください。</li></ul>
+          <button class="btn btn-ghost btn-sm" :disabled="busy" @click="openAdmin"><ShieldCheck :size="16" />管理者の方はこちら</button>
+        </section>
+      </template>
+      <template v-else-if="view === 'attendance'">
         <section class="page-intro"><div><p class="eyebrow">TEAM SCHEDULE</p><h1>みんなの予定、<br class="mobile-break" />ここで確認。</h1><p class="intro-description">練習も、試合も。出欠をそろえて、次の一日に備えよう。</p></div><div class="intro-emblem" aria-hidden="true"><span>ONE TEAM</span><strong>SD</strong><span>LET'S PLAY BALL</span></div></section>
         <section v-if="ready && !myPlayers.length" class="join-card card"><div class="join-icon"><Users :size="24" /></div><div><h2>はじめての方はこちら</h2><p>お子さまの名前を登録して、出欠を入力しましょう。</p></div><button class="btn btn-primary" @click="openRegistration"><Plus :size="18" />名前を登録する</button></section>
         <section v-else-if="ready" class="family-bar"><div><span class="family-label">登録中の選手</span><span v-for="player in myPlayers" :key="player.id" class="family-name">{{ player.name }}</span></div><button class="btn btn-ghost btn-sm" @click="openRegistration"><Plus :size="16" />兄弟・選手を追加</button></section>
@@ -182,9 +278,39 @@ async function saveName() {
         <div v-if="isDemo" class="admin-demo-note"><Info :size="18" />管理機能のお試し画面です。本番のパスワード認証は共有先への接続後に有効になります。</div>
         <button v-if="isSupabase" class="btn btn-outline mb-4" @click="adminTab = 'requests'">{{ multiDeviceAccess ? '端末追加申請' : '再登録申請' }} <span class="badge badge-primary">{{ pendingRequestCount }}件</span></button>
         <section v-if="adminTab === 'requests'" class="admin-panel card mb-4"><h2>{{ multiDeviceAccess ? '端末追加申請' : '再登録申請' }}</h2><p v-if="!requests.length" class="py-4">申請はありません。</p><div v-for="request in requests" :key="request.id" class="management-row"><div><h3>{{ request.playerName }}</h3><p v-if="multiDeviceAccess">申請者：{{ request.applicantName || '旧方式の申請（名前未入力）' }}<span v-if="request.relation">（{{ request.relation }}）</span></p><p>{{ new Date(request.requestedAt).toLocaleString('ja-JP') }} · {{ request.status === 'pending' ? '承認待ち' : request.status === 'approved' ? '承認済み' : '却下済み' }}</p><p v-if="request.status === 'pending' && request.notificationStatus !== 'sent'" class="text-sm">LINE通知：{{ request.notificationStatus === 'unconfigured' ? '未設定' : request.notificationStatus === 'failed' ? '送信失敗' : '未送信' }}</p></div><div v-if="request.status === 'pending'" class="row-actions"><button class="btn btn-sm btn-primary" :disabled="busy" @click="reviewRequest(request.id, request.playerName, 'approved')">承認</button><button class="btn btn-sm btn-outline" :disabled="busy" @click="reviewRequest(request.id, request.playerName, 'rejected')">却下</button></div></div></section>
-        <div class="admin-menu"><button v-for="item in [{ id: 'events' as const, title: 'イベント管理', desc: '予定の追加・編集', icon: CalendarDays }, { id: 'players' as const, title: '参加者管理', desc: '名前の編集・退団・復帰', icon: Users }, { id: 'password' as const, title: '管理パスワード', desc: '運営者の共通パスワード', icon: ShieldCheck }]" :key="item.id" class="card" :class="{ chosen: adminTab === item.id }" @click="adminTab = item.id"><component :is="item.icon" :size="23" /><strong>{{ item.title }}</strong><span>{{ item.desc }}</span></button></div>
+        <div class="admin-menu"><button v-for="item in [{ id: 'events' as const, title: 'イベント管理', desc: '予定の追加・編集', icon: CalendarDays }, { id: 'players' as const, title: '参加者管理', desc: '名前の編集・退団・復帰', icon: Users }, { id: 'password' as const, title: '管理パスワード', desc: '運営者の共通パスワード', icon: ShieldCheck }, ...(isSupabase ? [{ id: 'teamcode' as const, title: 'チームコード', desc: '閲覧の制限と端末', icon: KeyRound }] : [])]" :key="item.id" class="card" :class="{ chosen: adminTab === item.id }" @click="adminTab = item.id"><component :is="item.icon" :size="23" /><strong>{{ item.title }}</strong><span>{{ item.desc }}</span></button></div>
         <section v-if="adminTab === 'events'" class="admin-panel card"><div class="panel-heading"><h2>イベント一覧</h2><button class="btn btn-primary" @click="editEvent()"><Plus :size="18" />予定を追加</button></div><div class="month-controls admin-month-controls"><h2 aria-live="polite">{{ adminMonth.getFullYear() }}年 <strong>{{ adminMonth.getMonth() + 1 }}</strong>月</h2><div><button class="btn btn-ghost btn-circle btn-sm" aria-label="イベント一覧を前月に切り替える" @click="shiftAdminMonth(-1)"><ChevronLeft :size="19" /></button><button class="btn btn-ghost btn-circle btn-sm" aria-label="イベント一覧を翌月に切り替える" @click="shiftAdminMonth(1)"><ChevronRight :size="19" /></button></div><button class="btn btn-ghost btn-sm" @click="resetAdminMonth">今月</button></div><div v-for="event in managedEvents" :key="event.id" class="management-row"><div><span class="meta">{{ dateLabel(event.date, true) }} · {{ event.startTime }}–{{ event.endTime }}</span><h3>{{ event.title }}<span v-if="!event.active" class="badge badge-ghost">非表示</span></h3><p>{{ event.location }}</p></div><div class="row-actions"><button class="btn btn-sm btn-ghost" @click="editEvent(event)">編集</button><button class="btn btn-sm btn-outline" @click="toggleEvent(event)">{{ event.active ? '非表示' : '再表示' }}</button></div></div><p v-if="!managedEvents.length" class="empty-state">この月の予定はありません。</p></section>
         <section v-if="adminTab === 'players'" class="admin-panel card"><div class="panel-heading"><h2>選手一覧</h2><label class="mine-toggle"><input v-model="showRetired" type="checkbox" class="checkbox checkbox-sm" />退団者を表示</label></div><div v-for="player in managedPlayers" :key="player.id" class="management-row"><div><h3>{{ player.name }}</h3><p>{{ player.active ? '在籍中' : '退団済み' }}</p></div><div class="row-actions"><button v-if="isSupabase && multiDeviceAccess" class="btn btn-sm btn-outline" @click="devicePlayer = player; actionError = ''">利用端末</button><button class="btn btn-sm btn-ghost" @click="editingPlayer = player; editName = player.name; formError = ''; actionError = ''">編集</button><button class="btn btn-sm btn-outline" @click="togglePlayer(player)">{{ player.active ? '退団' : '在籍に戻す' }}</button></div></div></section>
+        <section v-if="adminTab === 'teamcode'" class="admin-panel card team-code-admin">
+          <div class="panel-heading"><h2>チームコード</h2><span :class="['badge', enforced ? 'badge-primary' : 'badge-ghost']">閲覧制限：{{ enforced ? '有効' : '無効' }}</span></div>
+          <p class="form-description">有効にすると、チームコードを入力した端末だけが、選手・予定・出欠を見られます。出欠を入力できる端末（登録済み・承認済み）は、そのまま使えます。</p>
+          <dl class="team-code-status">
+            <div><dt>コード</dt><dd>{{ teamCode?.issued ? `発行済み（第${teamCode.version}版・${formatTime(teamCode.updatedAt)}）` : '未発行' }}</dd></div>
+            <div v-if="teamCode?.previousValidUntil"><dt>前のコード</dt><dd>{{ formatTime(teamCode.previousValidUntil) }}まで使えます</dd></div>
+            <div><dt>閲覧できる端末</dt><dd>{{ memberTotal }}台<span v-if="teamMemberCounts">（コード入力 {{ teamMemberCounts.code }}・登録済み {{ teamMemberCounts.existingAccess }}・管理者 {{ teamMemberCounts.admin }}）</span></dd></div>
+          </dl>
+          <p v-if="!enforced" class="team-code-note" data-testid="members-before-enforcement">閲覧制限が無効の間は、出欠を入力できる端末（登録済み・承認済み）はまだこの数に入りません。閲覧制限を有効にした時点で自動的に追加され、コードを入力しなくても今までどおり使えます。</p>
+          <div class="team-code-actions">
+            <label v-if="teamCode?.issued" class="form-field">前のコード<select v-model.number="graceHours" class="select"><option :value="0">すぐに使えなくする</option><option :value="24">24時間は使えるようにする</option></select></label>
+            <button class="btn btn-primary" :disabled="busy" @click="confirmRotate"><KeyRound :size="17" />{{ teamCode?.issued ? '新しいコードに変更' : 'コードを発行する' }}</button>
+            <button class="btn btn-outline" :disabled="busy || (!enforced && !teamCode?.issued)" @click="confirmEnforcement(!enforced)">{{ enforced ? '閲覧制限を無効にする' : '閲覧制限を有効にする' }}</button>
+          </div>
+          <p v-if="!teamCode?.issued" class="text-sm">閲覧制限を有効にするには、先にコードを発行してください。</p>
+          <h3 class="team-code-subheading">閲覧できる端末</h3>
+          <div class="row-actions team-code-bulk">
+            <button class="btn btn-sm btn-outline" :disabled="busy" @click="confirmRevokeMembers('unbound')">閲覧だけの端末を停止</button>
+            <button class="btn btn-sm btn-outline" :disabled="busy" @click="confirmRevokeMembers('all')">全端末に再入力を求める</button>
+            <button v-if="!teamMembers.some(m => m.isCurrentDevice)" class="btn btn-sm btn-ghost" :disabled="busy" @click="addThisDevice">この端末を追加</button>
+          </div>
+          <p v-if="!teamMembers.length" class="py-4">閲覧できる端末はありません。</p>
+          <div v-for="member in teamMembers" :key="member.id" class="management-row">
+            <div><h3>{{ member.label || methodLabel(member.method) }}<span v-if="member.isCurrentDevice" class="badge badge-ghost">この端末</span></h3><p>{{ member.players.length ? member.players.join('、') : '選手なし' }} · {{ methodLabel(member.method) }}</p><p>確認：{{ formatTime(member.verifiedAt) }}<span v-if="member.lastSeenAt"> · 最終利用：{{ formatTime(member.lastSeenAt) }}</span></p></div>
+            <button class="btn btn-sm btn-outline" :disabled="busy" @click="confirmRevokeMember(member)">取り消す</button>
+          </div>
+          <h3 class="team-code-subheading">申請・登録の上限（スパム対策）<span :class="['badge', featureFlags.abuse_limits ? 'badge-primary' : 'badge-ghost']">{{ featureFlags.abuse_limits ? '有効' : '無効' }}</span></h3>
+          <p class="form-description">チームコードとは別の設定です。有効にすると、端末追加の申請・管理者へのLINE通知・選手の新規登録に上限がかかります。</p>
+          <button class="btn btn-outline" :disabled="busy" @click="confirmAbuseLimits(!featureFlags.abuse_limits)">{{ featureFlags.abuse_limits ? '上限を無効にする' : '上限を有効にする' }}</button>
+        </section>
         <section v-if="adminTab === 'password'" class="admin-panel card"><h2 class="text-lg font-bold mb-4">管理パスワードの変更</h2><p v-if="isDemo">共有先への接続後に利用できます。</p><form v-else class="event-form max-w-md" @submit.prevent="changePassword"><fieldset :disabled="busy" class="event-form"><label class="form-field">現在のパスワード<input v-model="currentPassword" type="password" class="input" autocomplete="current-password" required maxlength="128" /></label><label class="form-field">新しいパスワード（12文字以上）<input v-model="newPassword" type="password" class="input" autocomplete="new-password" required minlength="12" maxlength="128" /></label><label class="form-field">新しいパスワード（確認）<input v-model="passwordAgain" type="password" class="input" autocomplete="new-password" required minlength="12" maxlength="128" /></label><p class="text-sm text-gray-500">変更すると、ほかの運営者も再ログインが必要になります。</p><button class="btn btn-primary" type="submit">{{ busy ? '変更中…' : 'パスワードを変更する' }}</button></fieldset></form></section>
       </template>
       <footer class="site-footer"><span class="footer-brand">SOUTH DRAGONS</span><span>ひとつのチームで、次の一球へ。</span><span>TEAM ATTENDANCE</span></footer>
@@ -201,6 +327,7 @@ async function saveName() {
     <AppModal :busy="busy" :error="actionError" :open="!!editingPlayer" title="選手名を編集" @close="editingPlayer = null"><form @submit.prevent="saveName"><label class="form-field">名前<input v-model="editName" class="input" required maxlength="40" /></label><p v-if="formError" class="field-error" role="alert">{{ formError }}</p><button class="btn btn-primary w-full mt-5" type="submit">保存する</button></form></AppModal>
     <AppModal :busy="busy" :error="actionError" :open="!!devicePlayer && admin" title="利用端末" @close="devicePlayer = null"><template v-if="devicePlayer"><h3 class="text-lg font-bold">{{ devicePlayer.name }}</h3><p class="form-description">ここに表示された端末から出欠を入力できます。紛失した端末や使わなくなった端末は、編集権限を解除してください。</p><p v-if="!selectedDeviceAccess.length" class="py-4">利用できる端末はありません。保護者からの利用申請を承認してください。</p><div v-for="access in selectedDeviceAccess" :key="access.id" class="management-row"><div><h3>{{ access.applicantName || '登録時の端末' }}<span v-if="access.relation">（{{ access.relation }}）</span><span v-if="access.isCurrentDevice" class="badge badge-ghost">この端末</span></h3><p>登録：{{ new Date(access.grantedAt).toLocaleString('ja-JP') }}</p><p v-if="access.lastSeenAt">最終利用：{{ new Date(access.lastSeenAt).toLocaleString('ja-JP') }}</p></div><button class="btn btn-sm btn-outline" @click="revokeDevice(access)">権限を解除</button></div><button class="btn btn-ghost w-full mt-4" @click="devicePlayer = null">閉じる</button></template></AppModal>
     <AppModal :busy="busy" :error="actionError" :open="!!confirmAction" :title="confirmAction?.title || ''" @close="confirmAction = null"><p class="form-description">{{ confirmAction?.message }}</p><div class="modal-actions"><button class="btn btn-ghost" @click="confirmAction = null">キャンセル</button><button class="btn btn-primary" @click="confirmChange">{{ confirmAction?.label }}</button></div></AppModal>
+    <AppModal :busy="busy" :error="codeCopyError" :open="issuedOpen" :dismissible="false" title="新しいチームコード" @close="closeIssuedCode"><p class="form-description">このコードは<strong>この画面でしか表示されません</strong>。コピーまたはメモして、チームLINEのノートなどで保護者へお知らせください。</p><p class="issued-code" aria-live="polite" data-testid="issued-code">{{ issuedCode }}</p><button class="btn btn-primary w-full" @click="copyIssuedCode"><Copy :size="18" />{{ codeCopied ? 'コピーしました' : 'コードをコピー' }}</button><label class="issued-ack"><input v-model="codeAcknowledged" type="checkbox" class="checkbox checkbox-primary checkbox-sm" />コードを控えました（コピーまたはメモ済み）</label><button class="btn btn-ghost w-full" :disabled="!issuedCanClose" @click="closeIssuedCode">閉じる（再表示はできません）</button></AppModal>
     <div v-if="notice" class="toast toast-center" role="status"><div class="notice"><Check :size="18" />{{ notice }}</div></div>
   </div>
 </template>

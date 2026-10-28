@@ -1,0 +1,44 @@
+name: App checks
+# Runs the app's full test suite on every pull request and on pushes to main.
+# Separate from pages.yml (deploy) and the scheduled jobs. Uses no secrets or
+# repository variables, connects to no Supabase project and sends nothing:
+# database tests run against an in-memory PGlite instance.
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Unit, screen and Edge Function tests (Vitest)
+        run: >-
+          npx vitest run
+          --exclude tests/setup-sql.test.ts
+          --exclude tests/sql-safeupdate.test.ts
+          --exclude tests/team-code-rollback.test.ts
+      - name: SQL consistency, safeupdate and rollback tests (Vitest + PGlite)
+        run: npx vitest run tests/setup-sql.test.ts tests/sql-safeupdate.test.ts tests/team-code-rollback.test.ts
+      - name: Attendance reminder message tests
+        run: node --test tests/attendance-reminder.test.mjs
+      - name: Nuxt type check
+        run: npm run typecheck
+      - name: Type-check Edge Functions (Deno)
+        run: >-
+          npx --yes deno@2.9.6 check
+          supabase/functions/team/index.ts
+          supabase/functions/team/teamcode.ts
+          supabase/functions/maintenance/index.ts
+          supabase/functions/attendance-reminder/index.ts
