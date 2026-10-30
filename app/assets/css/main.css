@@ -171,6 +171,31 @@ h1 { font-size: 2.2rem; font-weight: 750; line-height: 1.4; letter-spacing: .035
 .duplicate-note { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; }
 .duplicate-note h3 { font-size: 1.15rem; font-weight: 700; line-height: 1.8; }
 .duplicate-note p { font-size: .875rem; color: #85937e; }
+/* Phase 4-F: registration entrances, confirmation and roster picker */
+.registration-choice { display: flex; flex-direction: column; gap: 12px; }
+.registration-choice .form-description { margin-bottom: 8px; }
+.choice-card { display: flex; align-items: flex-start; gap: 14px; text-align: left; border: 1px solid #dce5dd; border-radius: 12px; padding: 16px 18px; background: #fff; color: #214c35; }
+.choice-card:hover, .choice-card:focus-visible { border-color: #56805b; background: #f6faf5; }
+.choice-card span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.choice-card strong { font-size: .95rem; }
+.choice-card small { color: #7c887f; font-size: .8rem; line-height: 1.7; }
+.confirm-name { font-size: 1.25rem; font-weight: 750; text-align: center; padding: 10px; border-radius: 10px; background: #f3f7f2; overflow-wrap: anywhere; }
+.confirm-check { display: flex; align-items: flex-start; gap: 10px; font-size: .85rem; line-height: 1.7; }
+.confirm-check input { margin-top: 3px; flex-shrink: 0; }
+.similar-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.similar-list li, .candidate-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.similar-list span { font-weight: 650; overflow-wrap: anywhere; }
+.candidate-list { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
+.candidate-list li { border-top: 1px solid #e9eee5; padding: 10px 2px; }
+.candidate-list li > span:first-child { font-weight: 600; overflow-wrap: anywhere; }
+.search-field { display: flex; align-items: center; gap: 8px; }
+.exact-name summary { cursor: pointer; font-size: .85rem; color: #56805b; }
+.confirm-details { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; margin-bottom: 16px; font-size: .9rem; }
+.confirm-details div { display: contents; }
+.confirm-details dt { color: #7c887f; }
+.confirm-details dd { font-weight: 650; overflow-wrap: anywhere; min-width: 0; }
+.confirm-warning { font-size: .85rem; line-height: 1.7; margin-bottom: 14px; }
+.request-warning { color: #9a5b16; }
 .notice { background: #214c35; color: #fff; box-shadow: 0 6px 20px #183d3320; border-radius: 10px; padding: 16px 22px; display: flex; align-items: center; gap: 12px; font-size: .875rem; }
 .toast { z-index: 100; bottom: 20px; width: max-content; max-width: calc(100% - 30px); }
 .admin-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 25px; }

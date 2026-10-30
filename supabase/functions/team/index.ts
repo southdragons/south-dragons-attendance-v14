@@ -6,7 +6,9 @@ const url = Deno.env.get('SUPABASE_URL')!
 const service = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false, autoRefreshToken: false } })
 const actions = new Set(['getData','registerPlayer','saveAttendance','savePendingAttendance','requestRegistration','reviewRegistration','revokeDeviceAccess','saveEvent','setEventActive','renamePlayer','setPlayerActive','adminLogin','initializeAdmin','changeAdminPassword','adminLogout',
   // Team code. teamCodePrepare is internal and deliberately not callable from the browser.
-  'verifyTeamCode','rotateTeamCode','setTeamCodeEnforcement','revokeTeamMembers','revokeTeamMember','addCurrentDeviceAsMember','setFeatureFlag'])
+  'verifyTeamCode','rotateTeamCode','setTeamCodeEnforcement','revokeTeamMembers','revokeTeamMember','addCurrentDeviceAsMember','setFeatureFlag',
+  // Phase 4-F: roster picker for team-code devices and admins; exact-name lookup for the others.
+  'listDeviceCandidates','findPlayerForDevice'])
 const errors: Record<string, [number,string]> = {
   UNAUTHORIZED: [401,'管理画面への再ログイン、またはページの再読み込みをお願いします。'],
   FORBIDDEN: [403,'この端末では、この選手の出欠を変更できません。利用申請の承認状況を確認してください。'],

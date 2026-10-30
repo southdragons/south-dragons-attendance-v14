@@ -27,8 +27,9 @@ it('keeps the published client compatible with the old database before migration
   expect(api).toHaveBeenLastCalledWith('requestRegistration',{playerId:'p1'})
   await team.saveAttendance('e1','p1','late')
   expect(api).toHaveBeenLastCalledWith('savePendingAttendance',{eventId:'e1',playerId:'p1',status:'late',requestId:'r1'})
-  await team.reviewRegistration('r1','approved')
-  expect(api).toHaveBeenLastCalledWith('reviewRegistration',{requestId:'r1',decision:'approved'})
+  // Phase 4-F: the player shown on screen is sent too (an older database ignores the extra field).
+  await team.reviewRegistration('r1','p1','approved')
+  expect(api).toHaveBeenLastCalledWith('reviewRegistration',{requestId:'r1',playerId:'p1',decision:'approved'})
 })
 it('switches to approved-device access on refresh without exposing draft editing',async()=>{
   const team=useTeam()
@@ -51,8 +52,8 @@ it('sends explicit new approval semantics and removes revoked access on refresh'
   const team=useTeam()
   api.mockResolvedValueOnce({...snapshot(true,true),myPlayerIds:['p1']});await team.refresh()
   api.mockResolvedValue({snapshot:snapshot(true,true)})
-  await team.reviewRegistration('r1','approved')
-  expect(api).toHaveBeenLastCalledWith('reviewRegistration',{requestId:'r1',decision:'approved',accessModel:'multi-device'})
+  await team.reviewRegistration('r1','p1','approved')
+  expect(api).toHaveBeenLastCalledWith('reviewRegistration',{requestId:'r1',playerId:'p1',decision:'approved',accessModel:'multi-device'})
   await team.revokeDeviceAccess('a1')
   expect(api).toHaveBeenLastCalledWith('revokeDeviceAccess',{accessId:'a1',accessModel:'multi-device'})
   expect(team.canEdit('p1')).toBe(false)
