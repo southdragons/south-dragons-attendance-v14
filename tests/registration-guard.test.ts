@@ -174,8 +174,8 @@ describe('picking a registered player for a device', () => {
     await expect(api(outsider, 'registerPlayer', { name: '架空 太朗', confirmed: false })).rejects.toThrow('TEAM_CODE_REQUIRED')
   })
 
-  // Existing team-code design (unchanged here): switching the restriction on makes every device with edit
-  // rights a member. A device that registered a name while it was off can then pick from the roster.
+  // State after Phase 4-F alone (this file does not load 20261031000000_member_admission.sql): switching the
+  // restriction on makes every device with edit rights a member. Fixed in Phase 4-F2; see member-admission.test.ts.
   it('documents: switching the restriction on admits devices that already had edit rights', async () => {
     await enforce(true)
     expect((await api(stranger, 'listDeviceCandidates')).allowed).toBe(true)

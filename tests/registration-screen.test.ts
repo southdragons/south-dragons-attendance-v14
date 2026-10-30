@@ -70,3 +70,16 @@ it('rollback restores the previous team_api exactly; data is untouched', async (
     expect((await db.query<{ n: number }>('select count(*)::int n from public.players')).rows[0]!.n).toBe(2) // rows from before the rollback remain
   } finally { await db.close() }
 })
+
+it('Phase 4-F2: admins see unconfirmed players, can confirm them, and see what switching on would do', () => {
+  expect(app).toContain('data-testid="unverified-badge"')
+  expect(app).toContain('@click="confirmVerify(player)"')
+  expect(app).toContain('team.verifyPlayer(player.id)')
+  const enforcement = app.slice(app.indexOf('function confirmEnforcement('), app.indexOf('function confirmRevokeMembers('))
+  for (const text of ['そのまま使える端末', 'コード入力が必要な端末', 'admissionPreview.value.admitted', 'admissionPreview.value.needsCode', 'unverifiedPlayerIds.value.length'])
+    expect(enforcement).toContain(text)
+  expect(composable).toContain("adminMutation('verifyPlayer', { playerId }")
+  // Only admin snapshots carry these; a parent's screen never keeps them.
+  expect(composable).toContain('unverifiedPlayerIds.value = snapshot.admin ? snapshot.unverifiedPlayerIds || [] : []')
+  expect(readFileSync('supabase/functions/team/index.ts', 'utf8')).toContain("'verifyPlayer'")
+})

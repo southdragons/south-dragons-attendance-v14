@@ -1,12 +1,13 @@
 import { callSupabase } from '~/utils/supabase'
-import type { RegistrationRequest, PendingAttendance, DeviceAccess, TeamCodeStatus, TeamMember, TeamMemberCounts } from '~/types/team'
+import type { RegistrationRequest, PendingAttendance, DeviceAccess, TeamCodeStatus, TeamMember, TeamMemberCounts, AdmissionPreview } from '~/types/team'
 import type { AttendanceStatus, Player, TeamData, TeamEvent } from '~/types/team'
 import { createDemoData, createId, normalizeName, parseStoredData, setAnswer } from '~/utils/team'
 import { similarPlayers } from '~/utils/names'
 const STORAGE_KEY = 'south-dragons-demo-v1'
 const MY_PLAYERS_KEY = 'south-dragons-my-players-v1'
 type Snapshot = TeamData & { admin: boolean; adminConfigured: boolean; requests?: RegistrationRequest[]; pendingAttendance?: PendingAttendance[]; accessModel?: string; deviceAccess?: DeviceAccess[]
-  teamCode?: TeamCodeStatus; teamMembers?: TeamMember[]; teamMemberCounts?: TeamMemberCounts; featureFlags?: Record<string, boolean> }
+  teamCode?: TeamCodeStatus; teamMembers?: TeamMember[]; teamMemberCounts?: TeamMemberCounts; featureFlags?: Record<string, boolean>
+  unverifiedPlayerIds?: string[]; admissionPreview?: AdmissionPreview }
 export type TeamError = Error & { code?: string; statusCode?: number }
 /** registerName: an exact match, a request for the final confirmation, or the created player. */
 export type RegisterResult =
@@ -37,6 +38,9 @@ export function useTeam() {
   const teamMembers = useState<TeamMember[]>('team-members', () => [])
   const teamMemberCounts = useState<TeamMemberCounts | null>('team-member-counts', () => null)
   const featureFlags = useState<Record<string, boolean>>('feature-flags', () => ({}))
+  // Phase 4-F2 (admin only): players not yet confirmed, and what switching the restriction on would do.
+  const unverifiedPlayerIds = useState<string[]>('unverified-player-ids', () => [])
+  const admissionPreview = useState<AdmissionPreview | null>('admission-preview', () => null)
   const lastServerContact = useState('last-server-contact', () => 0)
   const isSupabase = computed(() => mode.value === 'supabase')
   const myPendingRequests = computed(() => requests.value.filter(r => r.isMine && r.status === 'pending'))
@@ -64,6 +68,7 @@ export function useTeam() {
     teamCodeRequired.value = true; admin.value = false
     data.value = emptyData(); requests.value = []; pendingAttendance.value = []; deviceAccess.value = []
     teamCode.value = null; teamMembers.value = []; teamMemberCounts.value = null; featureFlags.value = {}
+    unverifiedPlayerIds.value = []; admissionPreview.value = null
     // Enforcement can only be on after an admin issued a code, so admin sign-in is configured.
     adminConfigured.value = true; ready.value = true; storageError.value = ''
   }
@@ -79,6 +84,8 @@ export function useTeam() {
     teamMembers.value = snapshot.admin ? snapshot.teamMembers || [] : []
     teamMemberCounts.value = snapshot.admin ? snapshot.teamMemberCounts || null : null
     featureFlags.value = snapshot.admin ? snapshot.featureFlags || {} : {}
+    unverifiedPlayerIds.value = snapshot.admin ? snapshot.unverifiedPlayerIds || [] : []
+    admissionPreview.value = snapshot.admin ? snapshot.admissionPreview || null : null
   }
   function persist() {
     try {
@@ -228,6 +235,7 @@ export function useTeam() {
   const revokeTeamMember = (memberId: string) => adminMutation('revokeTeamMember', { memberId }, () => {})
   const addCurrentDeviceAsMember = () => adminMutation('addCurrentDeviceAsMember', {}, () => {})
   const setAbuseLimits = (enabled: boolean) => adminMutation('setFeatureFlag', { name: 'abuse_limits', enabled }, () => {})
+  const verifyPlayer = (playerId: string) => adminMutation('verifyPlayer', { playerId }, () => {})
   async function changePassword(currentPassword: string, password: string) {
     await mutation(async () => {
       if (isDemo.value) throw new Error('パスワード変更は共有先への接続後に利用できます。')
@@ -252,6 +260,6 @@ export function useTeam() {
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') revalidate() })
     window.addEventListener('pageshow', event => { if ((event as PageTransitionEvent).persisted) revalidate() })
   })
-  return { revalidate, teamCodeRequired, teamCode, teamMembers, teamMemberCounts, featureFlags, verifyTeamCode, rotateTeamCode, setTeamCodeEnforcement, revokeTeamMembers, revokeTeamMember, addCurrentDeviceAsMember, setAbuseLimits,
+  return { revalidate, teamCodeRequired, teamCode, teamMembers, teamMemberCounts, featureFlags, unverifiedPlayerIds, admissionPreview, verifyPlayer, verifyTeamCode, rotateTeamCode, setTeamCodeEnforcement, revokeTeamMembers, revokeTeamMember, addCurrentDeviceAsMember, setAbuseLimits,
     isSupabase, multiDeviceAccess, deviceAccess, revokeDeviceAccess, requests, pendingAttendance, myPendingRequests, pendingRequestCount, pendingRequest, canEdit, requestRegistration, reviewRegistration, listDeviceCandidates, findPlayerForDevice, data, ready, storageError, mode, isDemo, busy, admin, adminConfigured, refresh, registerName, rememberPlayer, saveAttendance, saveEvent, setEventActive, setPlayerActive, renamePlayer, login, logout, changePassword }
 }

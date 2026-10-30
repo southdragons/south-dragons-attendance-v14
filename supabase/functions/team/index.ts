@@ -8,7 +8,9 @@ const actions = new Set(['getData','registerPlayer','saveAttendance','savePendin
   // Team code. teamCodePrepare is internal and deliberately not callable from the browser.
   'verifyTeamCode','rotateTeamCode','setTeamCodeEnforcement','revokeTeamMembers','revokeTeamMember','addCurrentDeviceAsMember','setFeatureFlag',
   // Phase 4-F: roster picker for team-code devices and admins; exact-name lookup for the others.
-  'listDeviceCandidates','findPlayerForDevice'])
+  'listDeviceCandidates','findPlayerForDevice',
+  // Phase 4-F2: admin confirms a registered player (only confirmed players' devices are admitted as viewers).
+  'verifyPlayer'])
 const errors: Record<string, [number,string]> = {
   UNAUTHORIZED: [401,'管理画面への再ログイン、またはページの再読み込みをお願いします。'],
   FORBIDDEN: [403,'この端末では、この選手の出欠を変更できません。利用申請の承認状況を確認してください。'],

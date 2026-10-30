@@ -10,7 +10,7 @@ const migrationBody = (f: string) => readFileSync(`supabase/migrations/${f}`, 'u
 it('setup.sql contains every migration verbatim (writer_auth_permissions is a Supabase no-op and omitted)', () => {
   const setup = norm(readFileSync('supabase/setup.sql', 'utf8'))
   for (const f of ['20260911000000_v14.sql', '20260911000100_import.sql', '20260912000100_writer_jwt_subject.sql',
-    '20260913000000_multi_device_access.sql', '20261019000000_attendance_reminder.sql', '20261023000000_team_code.sql', '20261030000000_registration_guard.sql'])
+    '20260913000000_multi_device_access.sql', '20261019000000_attendance_reminder.sql', '20261023000000_team_code.sql', '20261030000000_registration_guard.sql', '20261031000000_member_admission.sql'])
     expect(setup.includes(norm(migrationBody(f))), f).toBe(true)
 })
 
