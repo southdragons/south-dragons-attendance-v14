@@ -1,12 +1,20 @@
 import { callSupabase } from '~/utils/supabase'
-import type { RegistrationRequest, PendingAttendance, DeviceAccess, TeamCodeStatus, TeamMember, TeamMemberCounts } from '~/types/team'
+import type { RegistrationRequest, PendingAttendance, DeviceAccess, TeamCodeStatus, TeamMember, TeamMemberCounts, AdmissionPreview } from '~/types/team'
 import type { AttendanceStatus, Player, TeamData, TeamEvent } from '~/types/team'
 import { createDemoData, createId, normalizeName, parseStoredData, setAnswer } from '~/utils/team'
+import { similarPlayers } from '~/utils/names'
 const STORAGE_KEY = 'south-dragons-demo-v1'
 const MY_PLAYERS_KEY = 'south-dragons-my-players-v1'
 type Snapshot = TeamData & { admin: boolean; adminConfigured: boolean; requests?: RegistrationRequest[]; pendingAttendance?: PendingAttendance[]; accessModel?: string; deviceAccess?: DeviceAccess[]
-  teamCode?: TeamCodeStatus; teamMembers?: TeamMember[]; teamMemberCounts?: TeamMemberCounts; featureFlags?: Record<string, boolean> }
+  teamCode?: TeamCodeStatus; teamMembers?: TeamMember[]; teamMemberCounts?: TeamMemberCounts; featureFlags?: Record<string, boolean>
+  unverifiedPlayerIds?: string[]; admissionPreview?: AdmissionPreview }
 export type TeamError = Error & { code?: string; statusCode?: number }
+/** registerName: an exact match, a request for the final confirmation, or the created player. */
+export type RegisterResult =
+  | { duplicate: true; player: Player }
+  | { duplicate: false; needsConfirmation: true; similar: Pick<Player, 'id' | 'name'>[]; similarVisible: boolean }
+  | { duplicate: false; needsConfirmation?: false; player: Player }
+export type DeviceCandidate = { id: string; name: string; mine: boolean; pending: boolean }
 const emptyData = (): TeamData => ({ version: 1, players: [], events: [], attendance: [], myPlayerIds: [] })
 // Re-check view access when the app comes back to the foreground, at most once per minute.
 export const RESUME_RECHECK_MS = 60_000
@@ -30,6 +38,9 @@ export function useTeam() {
   const teamMembers = useState<TeamMember[]>('team-members', () => [])
   const teamMemberCounts = useState<TeamMemberCounts | null>('team-member-counts', () => null)
   const featureFlags = useState<Record<string, boolean>>('feature-flags', () => ({}))
+  // Phase 4-F2 (admin only): players not yet confirmed, and what switching the restriction on would do.
+  const unverifiedPlayerIds = useState<string[]>('unverified-player-ids', () => [])
+  const admissionPreview = useState<AdmissionPreview | null>('admission-preview', () => null)
   const lastServerContact = useState('last-server-contact', () => 0)
   const isSupabase = computed(() => mode.value === 'supabase')
   const myPendingRequests = computed(() => requests.value.filter(r => r.isMine && r.status === 'pending'))
@@ -57,6 +68,7 @@ export function useTeam() {
     teamCodeRequired.value = true; admin.value = false
     data.value = emptyData(); requests.value = []; pendingAttendance.value = []; deviceAccess.value = []
     teamCode.value = null; teamMembers.value = []; teamMemberCounts.value = null; featureFlags.value = {}
+    unverifiedPlayerIds.value = []; admissionPreview.value = null
     // Enforcement can only be on after an admin issued a code, so admin sign-in is configured.
     adminConfigured.value = true; ready.value = true; storageError.value = ''
   }
@@ -72,6 +84,8 @@ export function useTeam() {
     teamMembers.value = snapshot.admin ? snapshot.teamMembers || [] : []
     teamMemberCounts.value = snapshot.admin ? snapshot.teamMemberCounts || null : null
     featureFlags.value = snapshot.admin ? snapshot.featureFlags || {} : {}
+    unverifiedPlayerIds.value = snapshot.admin ? snapshot.unverifiedPlayerIds || [] : []
+    admissionPreview.value = snapshot.admin ? snapshot.admissionPreview || null : null
   }
   function persist() {
     try {
@@ -113,23 +127,40 @@ export function useTeam() {
     busy.value = true
     try { return await work() } finally { busy.value = false }
   }
-  async function registerName(name: string) {
+  // Phase 4-F: a new player is created only when `confirmed` is true (the screen's final confirmation).
+  async function registerName(name: string, confirmed = false): Promise<RegisterResult> {
     return mutation(async () => {
-      if (isDemo.value) {
+      if (!isSupabase.value) {
+        // Demo / GAS: the roster is already on this device, so the same check runs here.
         const existing = data.value.players.find(p => normalizeName(p.name) === normalizeName(name))
         if (existing) return { duplicate: true, player: existing }
-        const player: Player = { id: createId(), name: name.trim(), active: true, joinedAt: new Date().toISOString(), retiredAt: null }
-        data.value.players.push(player); persist(); return { duplicate: false, player }
+        if (!confirmed) return { duplicate: false, needsConfirmation: true, similar: similarPlayers(data.value.players, name).map(p => ({ id: p.id, name: p.name })), similarVisible: true }
+        if (isDemo.value) {
+          const player: Player = { id: createId(), name: name.trim(), active: true, joinedAt: new Date().toISOString(), retiredAt: null }
+          data.value.players.push(player); persist(); return { duplicate: false, player }
+        }
       }
-      const result = await api<{ duplicate: boolean; player: Player; snapshot: Snapshot }>('registerPlayer', { name })
+      const result = await api<RegisterResult & { snapshot: Snapshot }>('registerPlayer', isSupabase.value ? { name, confirmed } : { name })
       apply(result.snapshot); return result
     })
+  }
+  // Existing players this device may pick. Supabase: only team-code devices and admins (`allowed`).
+  async function listDeviceCandidates(): Promise<{ allowed: boolean; players: DeviceCandidate[] }> {
+    if (!isSupabase.value) return { allowed: true, players: data.value.players.filter(p => p.active).map(p => ({ id: p.id, name: p.name, mine: data.value.myPlayerIds.includes(p.id), pending: !!pendingRequest(p.id) })) }
+    const result = await api<{ allowed: boolean; players?: DeviceCandidate[] }>('listDeviceCandidates')
+    return { allowed: !!result.allowed, players: result.allowed ? result.players || [] : [] }
+  }
+  // Exact name only, for devices that cannot pick from the roster.
+  async function findPlayerForDevice(name: string): Promise<{ found: boolean; limited?: boolean; player?: Pick<Player, 'id' | 'name'> }> {
+    if (!isSupabase.value) { const p = data.value.players.find(x => x.active && normalizeName(x.name) === normalizeName(name)); return p ? { found: true, player: { id: p.id, name: p.name } } : { found: false } }
+    return api('findPlayerForDevice', { name })
   }
   async function requestRegistration(playerId: string, applicantName = '', relation = '') {
     return mutation(async () => { apply((await api<{snapshot: Snapshot}>('requestRegistration', {playerId, ...(multiDeviceAccess.value ? {applicantName, relation, accessModel: 'multi-device'} : {})})).snapshot) })
   }
-  async function reviewRegistration(requestId: string, decision: 'approved' | 'rejected') {
-    return mutation(async () => { apply((await api<{snapshot: Snapshot}>('reviewRegistration', {requestId, decision, ...(multiDeviceAccess.value ? {accessModel: 'multi-device'} : {})})).snapshot) })
+  // The server re-checks that the request is still pending and belongs to the player the screen showed.
+  async function reviewRegistration(requestId: string, playerId: string, decision: 'approved' | 'rejected') {
+    return mutation(async () => { apply((await api<{snapshot: Snapshot}>('reviewRegistration', {requestId, playerId, decision, ...(multiDeviceAccess.value ? {accessModel: 'multi-device'} : {})})).snapshot) })
   }
   function rememberPlayer(player: Player) {
     if (!player.active || isSupabase.value) return
@@ -204,6 +235,7 @@ export function useTeam() {
   const revokeTeamMember = (memberId: string) => adminMutation('revokeTeamMember', { memberId }, () => {})
   const addCurrentDeviceAsMember = () => adminMutation('addCurrentDeviceAsMember', {}, () => {})
   const setAbuseLimits = (enabled: boolean) => adminMutation('setFeatureFlag', { name: 'abuse_limits', enabled }, () => {})
+  const verifyPlayer = (playerId: string) => adminMutation('verifyPlayer', { playerId }, () => {})
   async function changePassword(currentPassword: string, password: string) {
     await mutation(async () => {
       if (isDemo.value) throw new Error('パスワード変更は共有先への接続後に利用できます。')
@@ -228,6 +260,6 @@ export function useTeam() {
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') revalidate() })
     window.addEventListener('pageshow', event => { if ((event as PageTransitionEvent).persisted) revalidate() })
   })
-  return { revalidate, teamCodeRequired, teamCode, teamMembers, teamMemberCounts, featureFlags, verifyTeamCode, rotateTeamCode, setTeamCodeEnforcement, revokeTeamMembers, revokeTeamMember, addCurrentDeviceAsMember, setAbuseLimits,
-    isSupabase, multiDeviceAccess, deviceAccess, revokeDeviceAccess, requests, pendingAttendance, myPendingRequests, pendingRequestCount, pendingRequest, canEdit, requestRegistration, reviewRegistration, data, ready, storageError, mode, isDemo, busy, admin, adminConfigured, refresh, registerName, rememberPlayer, saveAttendance, saveEvent, setEventActive, setPlayerActive, renamePlayer, login, logout, changePassword }
+  return { revalidate, teamCodeRequired, teamCode, teamMembers, teamMemberCounts, featureFlags, unverifiedPlayerIds, admissionPreview, verifyPlayer, verifyTeamCode, rotateTeamCode, setTeamCodeEnforcement, revokeTeamMembers, revokeTeamMember, addCurrentDeviceAsMember, setAbuseLimits,
+    isSupabase, multiDeviceAccess, deviceAccess, revokeDeviceAccess, requests, pendingAttendance, myPendingRequests, pendingRequestCount, pendingRequest, canEdit, requestRegistration, reviewRegistration, listDeviceCandidates, findPlayerForDevice, data, ready, storageError, mode, isDemo, busy, admin, adminConfigured, refresh, registerName, rememberPlayer, saveAttendance, saveEvent, setEventActive, setPlayerActive, renamePlayer, login, logout, changePassword }
 }

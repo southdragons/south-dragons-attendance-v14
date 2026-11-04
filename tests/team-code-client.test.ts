@@ -189,5 +189,6 @@ it('listens for resume events and explains the device count before enforcement',
   expect(src).toContain("addEventListener('visibilitychange'")
   expect(src).toContain("addEventListener('pageshow'")
   const app = readFileSync('app/app.vue', 'utf8')
-  expect(app).toMatch(/<p v-if="!enforced" class="team-code-note" data-testid="members-before-enforcement">[^<]*有効にした時点で自動的に追加/)
+  // Phase 4-F2: only devices of confirmed players are added automatically when the restriction is switched on.
+  expect(app).toMatch(/<p v-if="!enforced" class="team-code-note" data-testid="members-before-enforcement">[^<]*有効にした時点で、<strong>確認済みの選手<\/strong>の端末だけが自動的に追加/)
 })

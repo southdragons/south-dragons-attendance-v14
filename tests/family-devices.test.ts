@@ -216,7 +216,7 @@ it('installs the consolidated SQL in an empty project with the same device acces
       grant execute on function auth.uid() to public;`)
     await fresh.exec(readFileSync('supabase/setup.sql','utf8'))
     await fresh.query('insert into auth.users(id) values($1)',[owner])
-    const result=await fresh.query<{result:any}>("select team_api($1,'registerPlayer',$2) as result",[owner,JSON.stringify({name:'新規環境'})])
+    const result=await fresh.query<{result:any}>("select team_api($1,'registerPlayer',$2) as result",[owner,JSON.stringify({name:'新規環境',confirmed:true})])
     const value=result.rows[0]!.result
     expect(value.snapshot.accessModel).toBe('multi-device')
     expect(value.snapshot.myPlayerIds).toEqual([value.player.id])
